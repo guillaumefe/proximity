@@ -1898,19 +1898,49 @@ function tokenize(text) {
     //   Dev backend: Java backend developer
     function parseGlossary(text) {
       return (text || "")
-        .split(/\r?\n/)             // ICI aussi
+        .split(/\r?\n/)
         .map((line) => line.trim())
         .filter((line) => line.length > 0 && !line.startsWith("#"))
         .map((line) => {
           const parts = line.split(/[:=]/);
           if (parts.length < 2) return null;
-          const from = parts[0].trim().toLowerCase();
-          const to = parts.slice(1).join(":").trim();
+          const from = parts[0].trim();     // variante / alias
+          const to   = parts.slice(1).join(":").trim(); // terme canonique
           if (!from || !to) return null;
           return { from, to };
         })
         .filter(Boolean);
     }
+    
+// Construit des "pivots" : un groupe par terme canonique
+// canonicalLower -> { canonical: string, variants: Set<string> }
+function buildGlossaryPivots(pairs) {
+  const canonicalGroups = new Map(); // clé: canonical lower
+  if (!Array.isArray(pairs)) return { canonicalGroups };
+
+  for (const pair of pairs) {
+    if (!pair || !pair.from || !pair.to) continue;
+
+    const canonical = pair.to.trim();
+    const canonicalLower = canonical.toLowerCase();
+
+    const variant = pair.from.trim();
+    const variantLower = variant.toLowerCase();
+
+    let group = canonicalGroups.get(canonicalLower);
+    if (!group) {
+      group = {
+        canonical,           // forme canonique telle qu'écrite à droite
+        variants: new Set()  // formes "from" différentes
+      };
+      canonicalGroups.set(canonicalLower, group);
+    }
+
+    group.variants.add(variant); // on garde la forme d'origine
+  }
+
+  return { canonicalGroups };
+}
 
     // We do not replace the text, we "enrich" each sentence
     // by appending the canonical term when the key appears.
@@ -1918,19 +1948,61 @@ function tokenize(text) {
     //   sentence: "PM digital"
     //   glossary: "PM = Digital project manager"
     //   -> "PM digital Digital project manager"
-    function applyGlossaryToSentence(sentence, glossaryPairs) {
-      if (!glossaryPairs || glossaryPairs.length === 0) return sentence;
-      let result = sentence || "";
-      const lower = (sentence || "").toLowerCase();
+// Enrichit une phrase en ajoutant le pivot canonique + toutes les variantes du groupe
+// dès qu'on détecte au moins un des termes (canonique ou variante).
+function applyGlossaryToSentence(sentence, glossary) {
+  const base = sentence || "";
+  if (!glossary || !glossary.canonicalGroups || glossary.canonicalGroups.size === 0) {
+    return base;
+  }
 
-      for (const pair of glossaryPairs) {
-        if (!pair || !pair.from) continue;
-        if (lower.includes(pair.from)) {
-          result += " " + pair.to;
+  let result = base;
+  // On travaille sur une seule version lowercase pour les détections
+  let lower = result.toLowerCase();
+
+  for (const [canonicalLower, group] of glossary.canonicalGroups.entries()) {
+    const canonical = group.canonical; // string
+    const canonicalLowerStr = canonicalLower;
+
+    let hit = false;
+
+    // 1) Si le texte contient déjà la forme canonique
+    if (lower.includes(canonicalLowerStr)) {
+      hit = true;
+    } else {
+      // 2) Sinon, vérifier chaque variante
+      for (const variant of group.variants) {
+        const vLower = variant.toLowerCase();
+        if (lower.includes(vLower)) {
+          hit = true;
+          break;
         }
       }
-      return result;
     }
+
+    if (!hit) continue;
+
+    // On a détecté au moins un terme du groupe → on injecte le pivot + toutes les variantes,
+    // mais seulement si elles ne sont pas déjà présentes (pour éviter les répétitions infinies).
+
+    // Ajout du canonique
+    if (!lower.includes(canonicalLowerStr)) {
+      result += " " + canonical;
+      lower += " " + canonicalLowerStr;
+    }
+
+    // Ajout de toutes les variantes de ce pivot
+    for (const variant of group.variants) {
+      const vLower = variant.toLowerCase();
+      if (!lower.includes(vLower)) {
+        result += " " + variant;
+        lower += " " + vLower;
+      }
+    }
+  }
+
+  return result;
+}
 
     // ---------------------------------------------------
     // Hybrid model: USE (if available) + TF-IDF + fuzzy
@@ -2456,19 +2528,21 @@ function parseList(text) {
 
     // Analysis button
     analyzeBtn.addEventListener("click", async () => {
-      const rawListA = parseList(listAEl.value);
-      const rawListB = parseList(listBEl.value);
-
-      const glossaryText = glossaryEl ? glossaryEl.value : "";
-      const glossaryPairs = parseGlossary(glossaryText);
-
-      // Enriched lists for similarity computation
-      const listAForSimilarity = rawListA.map((line) =>
-        applyGlossaryToSentence(line, glossaryPairs)
-      );
-      const listBForSimilarity = rawListB.map((line) =>
-        applyGlossaryToSentence(line, glossaryPairs)
-      );
+        
+        const rawListA = parseList(listAEl.value);
+        const rawListB = parseList(listBEl.value);
+        
+        const glossaryText   = glossaryEl ? glossaryEl.value : "";
+        const glossaryPairs  = parseGlossary(glossaryText);
+        const glossaryPivots = buildGlossaryPivots(glossaryPairs);
+        
+        // Listes enrichies pour le calcul de similarité
+        const listAForSimilarity = rawListA.map((line) =>
+          applyGlossaryToSentence(line, glossaryPivots)
+        );
+        const listBForSimilarity = rawListB.map((line) =>
+          applyGlossaryToSentence(line, glossaryPivots)
+        );
 
       window.__lastLists = {
         listA: rawListA.slice(),
