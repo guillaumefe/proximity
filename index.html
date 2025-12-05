@@ -1945,154 +1945,168 @@ You can also define abbreviations or translations."
       return useModelPromise;
     }
 
-    async function computeMatches(listA, listB, threshold) {
-      const canUseUSE = typeof use !== "undefined" && typeof tf !== "undefined";
+async function computeMatches(listA, listB, threshold) {
+  const canUseUSE = typeof use !== "undefined" && typeof tf !== "undefined";
 
-      // 1) Try Universal Sentence Encoder if available
-      if (canUseUSE) {
-        try {
-          const model = await getUseModel();
+  const nA = listA.length;
+  const nB = listB.length;
 
-          const allSentences = [...listA, ...listB];
-          if (allSentences.length === 0) {
-            updateStats(listA.length, listB.length, 0, threshold);
-            return {
-              matchesFromA: [],
-              matchesFromB: [],
-              vocabSize: 0
-            };
-          }
+  // Rien à comparer
+  if (nA === 0 || nB === 0) {
+    updateStats(nA, nB, 0, threshold);
+    return {
+      matchesFromA: [],
+      matchesFromB: [],
+      vocabSize: 0
+    };
+  }
 
-          const embeddings = await model.embed(allSentences);
-          const nA = listA.length;
-          const nB = listB.length;
+  // Limite pour éviter d’exploser le navigateur avec USE
+  // (par ex. 200 x 200 = 40 000 comparaisons)
+  const MAX_USE_COMPARISONS = 40000;
 
-          const embA = embeddings.slice([0, 0], [nA, -1]);
-          const embB = embeddings.slice([nA, 0], [nB, -1]);
+  // 1) Tentative avec Universal Sentence Encoder (si dispo et taille raisonnable)
+  if (canUseUSE && nA * nB <= MAX_USE_COMPARISONS) {
+    try {
+      const model = await getUseModel();
 
-          function cosineRow(tA, tB) {
-            const dot = tA.mul(tB).sum();
-            const nA = tA.square().sum().sqrt();
-            const nB = tB.square().sum().sqrt();
-            return dot.div(nA.mul(nB)).dataSync()[0];
-          }
+      const allSentences = [...listA, ...listB];
+      const embeddings = await model.embed(allSentences);
 
-          const matchesFromA = [];
-          const matchesFromB = [];
+      const dim = embeddings.shape[1];
 
-          // A -> B
-          for (let i = 0; i < nA; i++) {
-            const rowA = embA.slice([i, 0], [1, -1]);
-            let bestScore = 0;
-            let bestIdx = null;
+      const result = tf.tidy(() => {
+        // Séparer A et B
+        const embA = embeddings.slice([0, 0], [nA, dim]);   // [nA, dim]
+        const embB = embeddings.slice([nA, 0], [nB, dim]);  // [nB, dim]
 
-            for (let j = 0; j < nB; j++) {
-              const rowB = embB.slice([j, 0], [1, -1]);
-              const score = cosineRow(rowA, rowB);
-              if (score > bestScore) {
-                bestScore = score;
-                bestIdx = j;
-              }
-            }
+        // Normalisation L2 par ligne
+        const normA = embA.norm("euclidean", 1).expandDims(1); // [nA, 1]
+        const normB = embB.norm("euclidean", 1).expandDims(1); // [nB, 1]
 
-            if (bestIdx !== null && bestScore >= threshold) {
-              matchesFromA.push({ fromIndex: i, toIndex: bestIdx, score: bestScore });
-            } else {
-              matchesFromA.push({ fromIndex: i, toIndex: null, score: bestScore });
-            }
-          }
+        const embA_norm = embA.div(normA);
+        const embB_norm = embB.div(normB);
 
-          // B -> A
-          for (let j = 0; j < nB; j++) {
-            const rowB = embB.slice([j, 0], [1, -1]);
-            let bestScore = 0;
-            let bestIdx = null;
+        // Matrice des similarités cosinus : [nA, nB]
+        const simMatrix = embA_norm.matMul(embB_norm, false, true);
+        const sims = simMatrix.arraySync(); // tableau JS 2D
 
-            for (let i = 0; i < nA; i++) {
-              const rowA = embA.slice([i, 0], [1, -1]);
-              const score = cosineRow(rowA, rowB);
-              if (score > bestScore) {
-                bestScore = score;
-                bestIdx = i;
-              }
-            }
+        const matchesFromA = [];
+        const matchesFromB = [];
 
-            if (bestIdx !== null && bestScore >= threshold) {
-              matchesFromB.push({ fromIndex: j, toIndex: bestIdx, score: bestScore });
-            } else {
-              matchesFromB.push({ fromIndex: j, toIndex: null, score: bestScore });
-            }
-          }
-
-          updateStats(nA, nB, 0, threshold);
-          return { matchesFromA, matchesFromB, vocabSize: 0 };
-        } catch (err) {
-          console.error("Error with USE/TFJS, falling back to TF-IDF:", err);
-          // Fall through to TF-IDF implementation
-        }
-      }
-
-      // 2) Pure JS fallback: TF-IDF + fuzzy similarity
-      const listTokensA = listA.map(tokenize);
-      const listTokensB = listB.map(tokenize);
-      const allTokens = [...listTokensA, ...listTokensB];
-
-      const { vectors, vocabSize } = computeTfidfVectors(allTokens);
-      const nA = listA.length;
-      const nB = listB.length;
-
-      const vecA = vectors.slice(0, nA);
-      const vecB = vectors.slice(nA);
-
-      const matchesFromA = [];
-      const matchesFromB = [];
-
-      const alpha = 0.7; // semantic weight (TF-IDF or USE)
-      const beta = 0.3;  // fuzzy weight on raw strings
-
-      // A -> B
-      for (let i = 0; i < nA; i++) {
-        let bestScore = 0;
-        let bestIdx = null;
-        for (let j = 0; j < nB; j++) {
-          const s1 = cosineSimilarity(vecA[i], vecB[j]);
-          const s2 = fuzzySimilarity(listA[i], listB[j]);
-          const score = alpha * s1 + beta * s2;
-          if (score > bestScore) {
-            bestScore = score;
-            bestIdx = j;
-          }
-        }
-        if (bestIdx !== null && bestScore >= threshold) {
-          matchesFromA.push({ fromIndex: i, toIndex: bestIdx, score: bestScore });
-        } else {
-          matchesFromA.push({ fromIndex: i, toIndex: null, score: bestScore });
-        }
-      }
-
-      // B -> A
-      for (let j = 0; j < nB; j++) {
-        let bestScore = 0;
-        let bestIdx = null;
+        // A -> B : pour chaque ligne de listA, meilleur match dans listB
         for (let i = 0; i < nA; i++) {
-          const s1 = cosineSimilarity(vecB[j], vecA[i]);
-          const s2 = fuzzySimilarity(listB[j], listA[i]);
-          const score = alpha * s1 + beta * s2;
-          if (score > bestScore) {
-            bestScore = score;
-            bestIdx = i;
+          let bestScore = -1;
+          let bestIdx = null;
+          for (let j = 0; j < nB; j++) {
+            const score = sims[i][j];
+            if (score > bestScore) {
+              bestScore = score;
+              bestIdx = j;
+            }
+          }
+          if (bestIdx !== null && bestScore >= threshold) {
+            matchesFromA.push({ fromIndex: i, toIndex: bestIdx, score: bestScore });
+          } else {
+            matchesFromA.push({ fromIndex: i, toIndex: null, score: bestScore });
           }
         }
-        if (bestIdx !== null && bestScore >= threshold) {
-          matchesFromB.push({ fromIndex: j, toIndex: bestIdx, score: bestScore });
-        } else {
-          matchesFromB.push({ fromIndex: j, toIndex: null, score: bestScore });
-        }
-      }
 
-      updateStats(nA, nB, vocabSize, threshold);
-      return { matchesFromA, matchesFromB, vocabSize };
+        // B -> A : pour chaque ligne de listB, meilleur match dans listA
+        for (let j = 0; j < nB; j++) {
+          let bestScore = -1;
+          let bestIdx = null;
+          for (let i = 0; i < nA; i++) {
+            const score = sims[i][j];
+            if (score > bestScore) {
+              bestScore = score;
+              bestIdx = i;
+            }
+          }
+          if (bestIdx !== null && bestScore >= threshold) {
+            matchesFromB.push({ fromIndex: j, toIndex: bestIdx, score: bestScore });
+          } else {
+            matchesFromB.push({ fromIndex: j, toIndex: null, score: bestScore });
+          }
+        }
+
+        return { matchesFromA, matchesFromB };
+      });
+
+      // On libère le gros tenseur d’embeddings
+      embeddings.dispose();
+
+      updateStats(nA, nB, 0, threshold);
+      return {
+        matchesFromA: result.matchesFromA,
+        matchesFromB: result.matchesFromB,
+        vocabSize: 0
+      };
+    } catch (err) {
+      console.error("Error with USE/TFJS, falling back to TF-IDF:", err);
+      // On laisse filer vers la partie TF-IDF
     }
+  }
+
+  // 2) Fallback : TF-IDF + fuzzy (version JS pure)
+  const listTokensA = listA.map(tokenize);
+  const listTokensB = listB.map(tokenize);
+  const allTokens = [...listTokensA, ...listTokensB];
+
+  const { vectors, vocabSize } = computeTfidfVectors(allTokens);
+
+  const vecA = vectors.slice(0, nA);
+  const vecB = vectors.slice(nA);
+
+  const matchesFromA = [];
+  const matchesFromB = [];
+
+  const alpha = 0.7; // poids “sémantique” (TF-IDF)
+  const beta = 0.3;  // poids fuzzy (Levenshtein brut)
+
+  // A -> B
+  for (let i = 0; i < nA; i++) {
+    let bestScore = 0;
+    let bestIdx = null;
+    for (let j = 0; j < nB; j++) {
+      const s1 = cosineSimilarity(vecA[i], vecB[j]);
+      const s2 = fuzzySimilarity(listA[i], listB[j]);
+      const score = alpha * s1 + beta * s2;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = j;
+      }
+    }
+    if (bestIdx !== null && bestScore >= threshold) {
+      matchesFromA.push({ fromIndex: i, toIndex: bestIdx, score: bestScore });
+    } else {
+      matchesFromA.push({ fromIndex: i, toIndex: null, score: bestScore });
+    }
+  }
+
+  // B -> A
+  for (let j = 0; j < nB; j++) {
+    let bestScore = 0;
+    let bestIdx = null;
+    for (let i = 0; i < nA; i++) {
+      const s1 = cosineSimilarity(vecB[j], vecA[i]);
+      const s2 = fuzzySimilarity(listB[j], listA[i]);
+      const score = alpha * s1 + beta * s2;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx !== null && bestScore >= threshold) {
+      matchesFromB.push({ fromIndex: j, toIndex: bestIdx, score: bestScore });
+    } else {
+      matchesFromB.push({ fromIndex: j, toIndex: null, score: bestScore });
+    }
+  }
+
+  updateStats(nA, nB, vocabSize, threshold);
+  return { matchesFromA, matchesFromB, vocabSize };
+}
 
     // ---------------------------------------------------
     // UI state, rendering & YAML export
