@@ -2485,137 +2485,108 @@ async function computeMatches(listA, listB, threshold = 0.35) {
       });
     }
 
-    // View A -> B
+    // View A -> B (ne montrer que les éléments avec correspondance)
     if (listA.length === 0) {
       viewAEl.innerHTML = `<div class="empty-state">${translate(
         "results.emptyA"
       )}</div>`;
     } else {
       const rows = matchesFromA
+        // ⚠️ on garde seulement ceux qui ont une correspondance
+        .filter((m) => m.toIndex !== null && listB[m.toIndex])
         .map((m) => {
           const leftText = escapeHtml(listA[m.fromIndex] || "");
-          const rightText =
-            m.toIndex !== null ? escapeHtml(listB[m.toIndex] || "") : "";
-          const hasMatch =
-            m.toIndex !== null && rightText.trim().length > 0;
-
+          const rightText = escapeHtml(listB[m.toIndex] || "");
+    
           const labelLeft = translate("row.list1Label", {
             index: m.fromIndex + 1
           });
-          const labelRight = hasMatch
-            ? translate("row.list2Label", { index: m.toIndex + 1 })
-            : null;
-          const noStrongMatch = translate("row.noStrongMatch");
+          const labelRight = translate("row.list2Label", {
+            index: m.toIndex + 1
+          });
           const scoreLabel = translate("row.score");
-          const placeholder = translate("row.noContentPlaceholder");
-
+    
           return `
-        <div class="match-row">
-          <div class="item-card">
-            <div class="item-label">
-              <span><strong>${labelLeft}</strong></span>
-              <span class="score-pill">
-                ${scoreLabel} <strong>${formatScore(m.score)}</strong>
-              </span>
+            <div class="match-row">
+              <div class="item-card">
+                <div class="item-label">
+                  <span><strong>${labelLeft}</strong></span>
+                  <span class="score-pill">
+                    ${scoreLabel} <strong>${formatScore(m.score)}</strong>
+                  </span>
+                </div>
+                <div class="item-text">${leftText}</div>
+              </div>
+              <div class="arrow-cell" aria-hidden="true">
+                <div class="arrow-pill">➝</div>
+              </div>
+              <div class="item-card">
+                <div class="item-label">
+                  <span><strong>${labelRight}</strong></span>
+                </div>
+                <div class="item-text">${rightText}</div>
+              </div>
             </div>
-            <div class="item-text">${leftText}</div>
-          </div>
-          <div class="arrow-cell" aria-hidden="true">
-            <div class="arrow-pill">➝</div>
-          </div>
-          <div class="item-card">
-            <div class="item-label">
-              ${
-                hasMatch
-                  ? `<span><strong>${labelRight}</strong></span>`
-                  : `<span class="no-match">
-                       <span class="no-match-dot"></span>${noStrongMatch}
-                     </span>`
-              }
-            </div>
-            <div class="item-text">
-              ${
-                hasMatch
-                  ? rightText
-                  : `<span style="opacity:0.8;">${placeholder}</span>`
-              }
-            </div>
-          </div>
-        </div>
-      `;
+          `;
         })
         .join("");
-
+    
       viewAEl.innerHTML =
         rows ||
         `<div class="empty-state">${translate("results.noMatches")}</div>`;
     }
 
-    // View B -> A
+    // View B -> A (ne montrer que les éléments avec correspondance)
     if (listB.length === 0) {
       viewBEl.innerHTML = `<div class="empty-state">${translate(
         "results.emptyB"
       )}</div>`;
     } else {
       const rowsB = matchesFromB
+        // ⚠️ on garde seulement ceux qui ont une correspondance
+        .filter((m) => m.toIndex !== null && listA[m.toIndex])
         .map((m) => {
           const leftText = escapeHtml(listB[m.fromIndex] || "");
-          const rightText =
-            m.toIndex !== null ? escapeHtml(listA[m.toIndex] || "") : "";
-          const hasMatch =
-            m.toIndex !== null && rightText.trim().length > 0;
-
+          const rightText = escapeHtml(listA[m.toIndex] || "");
+    
           const labelLeft = translate("row.list2Label", {
             index: m.fromIndex + 1
           });
-          const labelRight = hasMatch
-            ? translate("row.list1Label", { index: m.toIndex + 1 })
-            : null;
-          const noStrongMatch = translate("row.noStrongMatch");
+          const labelRight = translate("row.list1Label", {
+            index: m.toIndex + 1
+          });
           const scoreLabel = translate("row.score");
-          const placeholder = translate("row.noContentPlaceholder");
-
+    
           return `
-        <div class="match-row">
-          <div class="item-card">
-            <div class="item-label">
-              <span><strong>${labelLeft}</strong></span>
-              <span class="score-pill">
-                ${scoreLabel} <strong>${formatScore(m.score)}</strong>
-              </span>
+            <div class="match-row">
+              <div class="item-card">
+                <div class="item-label">
+                  <span><strong>${labelLeft}</strong></span>
+                  <span class="score-pill">
+                    ${scoreLabel} <strong>${formatScore(m.score)}</strong>
+                  </span>
+                </div>
+                <div class="item-text">${leftText}</div>
+              </div>
+              <div class="arrow-cell" aria-hidden="true">
+                <div class="arrow-pill">➝</div>
+              </div>
+              <div class="item-card">
+                <div class="item-label">
+                  <span><strong>${labelRight}</strong></span>
+                </div>
+                <div class="item-text">${rightText}</div>
+              </div>
             </div>
-            <div class="item-text">${leftText}</div>
-          </div>
-          <div class="arrow-cell" aria-hidden="true">
-            <div class="arrow-pill">➝</div>
-          </div>
-          <div class="item-card">
-            <div class="item-label">
-              ${
-                hasMatch
-                  ? `<span><strong>${labelRight}</strong></span>`
-                  : `<span class="no-match">
-                       <span class="no-match-dot"></span>${noStrongMatch}
-                     </span>`
-              }
-            </div>
-            <div class="item-text">
-              ${
-                hasMatch
-                  ? rightText
-                  : `<span style="opacity:0.8;">${placeholder}</span>`
-              }
-            </div>
-          </div>
-        </div>
-      `;
+          `;
         })
         .join("");
-
+    
       viewBEl.innerHTML =
         rowsB ||
         `<div class="empty-state">${translate("results.noMatches")}</div>`;
     }
+    
   }
 
   // Expose in global scope for the export module
@@ -2779,57 +2750,64 @@ analyzeBtn.addEventListener("click", async () => {
           if (!Array.isArray(listA) || !Array.isArray(matchesFromA)) {
             return translate("empty.list1") + "\n";
           }
-
+        
           const rootKey = translate("yaml.list1Root");
           const lines = [];
           lines.push(rootKey + ":");
-
-          if (listA.length === 0) {
+        
+          // On ne garde que les éléments qui ont une correspondance
+          const filtered = matchesFromA.filter(
+            (m) => m.toIndex !== null && listB && listB[m.toIndex]
+          );
+        
+          if (filtered.length === 0) {
+            // aucune correspondance -> liste vide
             return translate("empty.list1") + "\n";
           }
-
-          matchesFromA.forEach(function (m) {
+        
+          filtered.forEach(function (m) {
             const parentText = listA[m.fromIndex] || "";
+            const childText = listB[m.toIndex] || "";
+        
             lines.push("  - parent: " + toYamlScalar(parentText));
-
-            if (m.toIndex !== null && listB && listB[m.toIndex]) {
-              const childText = listB[m.toIndex];
-              lines.push("    children:");
-              lines.push("      - " + toYamlScalar(childText));
-            } else {
-              lines.push("    children: []");
-            }
+            lines.push("    children:");
+            lines.push("      - " + toYamlScalar(childText));
           });
-
+        
           return lines.join("\n") + "\n";
-        } else {
+        }
+
+        else {
           if (!Array.isArray(listB) || !Array.isArray(matchesFromB)) {
             return translate("empty.list2") + "\n";
           }
-
+        
           const rootKey = translate("yaml.list2Root");
           const lines = [];
           lines.push(rootKey + ":");
-
-          if (listB.length === 0) {
+        
+          // On ne garde que les éléments qui ont une correspondance
+          const filtered = matchesFromB.filter(
+            (m) => m.toIndex !== null && listA && listA[m.toIndex]
+          );
+        
+          if (filtered.length === 0) {
+            // aucune correspondance -> liste vide
             return translate("empty.list2") + "\n";
           }
-
-          matchesFromB.forEach(function (m) {
+        
+          filtered.forEach(function (m) {
             const parentText = listB[m.fromIndex] || "";
+            const childText = listA[m.toIndex] || "";
+        
             lines.push("  - parent: " + toYamlScalar(parentText));
-
-            if (m.toIndex !== null && listA && listA[m.toIndex]) {
-              const childText = listA[m.toIndex];
-              lines.push("    children:");
-              lines.push("      - " + toYamlScalar(childText));
-            } else {
-              lines.push("    children: []");
-            }
+            lines.push("    children:");
+            lines.push("      - " + toYamlScalar(childText));
           });
-
+        
           return lines.join("\n") + "\n";
         }
+
       }
 
       const resultsHeader = document.querySelector(".results-header");
