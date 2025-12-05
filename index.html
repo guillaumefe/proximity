@@ -1898,37 +1898,104 @@ function tokenize(text) {
     //   Dev backend: Java backend developer
     // Construit un index de pivots par terme important (stem)
     // term (stem) -> { expansions: Set<string> }
+    // Construit un index de pivots par terme important, en connectant
+    // entre elles toutes les entrées de glossaire qui partagent au moins un terme.
     function buildGlossaryTermPivotIndex(glossaryPairs) {
       const pivotIndex = new Map();
     
-      if (!Array.isArray(glossaryPairs)) return { pivotIndex };
+      if (!Array.isArray(glossaryPairs) || glossaryPairs.length === 0) {
+        return { pivotIndex };
+      }
     
-      for (const pair of glossaryPairs) {
+      const n = glossaryPairs.length;
+    
+      // ----- union-find pour regrouper les lignes de glossaire -----
+      const parents = new Array(n);
+      for (let i = 0; i < n; i++) parents[i] = i;
+    
+      function find(i) {
+        while (parents[i] !== i) {
+          parents[i] = parents[parents[i]];
+          i = parents[i];
+        }
+        return i;
+      }
+    
+      function union(a, b) {
+        const ra = find(a);
+        const rb = find(b);
+        if (ra !== rb) {
+          parents[rb] = ra;
+        }
+      }
+    
+      // Pour chaque ligne, les termes importants (stems) qui la composent
+      const pairTerms = new Array(n);
+      const termFirstPair = new Map(); // term -> premier index rencontré
+    
+      for (let i = 0; i < n; i++) {
+        const pair = glossaryPairs[i];
+        if (!pair || !pair.from || !pair.to) {
+          pairTerms[i] = [];
+          continue;
+        }
+    
+        const docText = `${pair.from} ${pair.to}`;
+        const terms = Array.from(new Set(tokenize(docText))); // stems importants
+        pairTerms[i] = terms;
+    
+        for (const t of terms) {
+          if (!t || t.length < 2) continue;
+          const firstIdx = termFirstPair.get(t);
+          if (firstIdx == null) {
+            termFirstPair.set(t, i);
+          } else {
+            // cette entrée partage le terme t avec firstIdx → même composante
+            union(i, firstIdx);
+          }
+        }
+      }
+    
+      // ----- Regrouper par composante -----
+      // root -> { expansions: Set<string>, terms: Set<string> }
+      const groups = new Map();
+    
+      for (let i = 0; i < n; i++) {
+        const pair = glossaryPairs[i];
         if (!pair || !pair.from || !pair.to) continue;
     
-        const keyText = pair.from.trim();
-        const valText = pair.to.trim();
-        if (!keyText || !valText) continue;
+        const root = find(i);
+        let group = groups.get(root);
+        if (!group) {
+          group = {
+            expansions: new Set(),
+            terms: new Set()
+          };
+          groups.set(root, group);
+        }
     
-        // Tous les mots de la clé + de la valeur
-        const importantTerms = tokenize(keyText + " " + valText);
-        const uniqueTerms = new Set(importantTerms); // éviter les doublons
+        // expansions = ce qu'on injectera dans les phrases
+        group.expansions.add(pair.from.trim());
+        group.expansions.add(pair.to.trim());
     
-        // Ce sont NOS "termes importants"
-        for (const term of uniqueTerms) {
-          if (!term || term.length < 2) continue; // sécurité
+        // termes importants qui caractérisent ce groupe
+        for (const t of pairTerms[i] || []) {
+          if (!t || t.length < 2) continue;
+          group.terms.add(t);
+        }
+      }
     
+      // ----- Construire l'index final : terme important -> expansions fusionnées -----
+      for (const group of groups.values()) {
+        for (const term of group.terms) {
           let entry = pivotIndex.get(term);
           if (!entry) {
             entry = { expansions: new Set() };
             pivotIndex.set(term, entry);
           }
-    
-          // On ajoute les expressions "brutes" que l'utilisateur a données :
-          // - la clé
-          // - la valeur
-          entry.expansions.add(keyText);
-          entry.expansions.add(valText);
+          for (const exp of group.expansions) {
+            entry.expansions.add(exp);
+          }
         }
       }
     
@@ -1991,52 +2058,51 @@ function parseGlossary(text) {
     //   sentence: "PM digital"
     //   glossary: "PM = Digital project manager"
     //   -> "PM digital Digital project manager"
-// Enrichit une phrase en ajoutant le pivot canonique + toutes les variantes du groupe
-// dès qu'on détecte au moins un des termes (canonique ou variante).
-// Enrichit une phrase en utilisant les pivots par terme important
-// sentence: texte original
-// glossaryPivot: objet retourné par buildGlossaryTermPivotIndex
-function applyGlossaryToSentence(sentence, glossaryPivot) {
-  const base = sentence || "";
-  if (
-    !glossaryPivot ||
-    !glossaryPivot.pivotIndex ||
-    glossaryPivot.pivotIndex.size === 0
-  ) {
-    return base;
-  }
-
-  let result = base;
-  let lowerResult = result.toLowerCase();
-
-  // On prend les stems de la phrase (mêmes "termes importants" que pour le glossaire)
-  const sentenceTerms = new Set(tokenize(base));
-
-  // Pour éviter d’ajouter un milliard de choses
-  const MAX_EXPANSIONS_PER_SENTENCE = 20;
-  let expansionsCount = 0;
-
-  for (const term of sentenceTerms) {
-    const entry = glossaryPivot.pivotIndex.get(term);
-    if (!entry) continue;
-
-    for (const exp of entry.expansions) {
-      if (expansionsCount >= MAX_EXPANSIONS_PER_SENTENCE) break;
-
-      const expLower = exp.toLowerCase();
-      // Si la phrase contient déjà cette expansion, on ne la répète pas
-      if (lowerResult.includes(expLower)) continue;
-
-      result += " " + exp;
-      lowerResult += " " + expLower;
-      expansionsCount++;
+    // Enrichit une phrase en ajoutant le pivot canonique + toutes les variantes du groupe
+    // dès qu'on détecte au moins un des termes (canonique ou variante).
+    // Enrichit une phrase en utilisant les pivots par terme important
+    // sentence: texte original
+    // glossaryPivot: objet retourné par buildGlossaryTermPivotIndex
+    function applyGlossaryToSentence(sentence, glossaryPivot) {
+      const base = sentence || "";
+      if (
+        !glossaryPivot ||
+        !glossaryPivot.pivotIndex ||
+        glossaryPivot.pivotIndex.size === 0
+      ) {
+        return base;
+      }
+    
+      let result = base;
+      let lowerResult = result.toLowerCase();
+    
+      // mêmes "termes importants" que pour le glossaire
+      const sentenceTerms = new Set(tokenize(base));
+    
+      const MAX_EXPANSIONS_PER_SENTENCE = 20; // sécurité
+      let expansionsCount = 0;
+    
+      for (const term of sentenceTerms) {
+        const entry = glossaryPivot.pivotIndex.get(term);
+        if (!entry) continue;
+    
+        for (const exp of entry.expansions) {
+          if (expansionsCount >= MAX_EXPANSIONS_PER_SENTENCE) break;
+    
+          const expLower = exp.toLowerCase();
+          if (lowerResult.includes(expLower)) continue;
+    
+          result += " " + exp;
+          lowerResult += " " + expLower;
+          expansionsCount++;
+        }
+    
+        if (expansionsCount >= MAX_EXPANSIONS_PER_SENTENCE) break;
+      }
+    
+      return result;
     }
 
-    if (expansionsCount >= MAX_EXPANSIONS_PER_SENTENCE) break;
-  }
-
-  return result;
-}
 
     // ---------------------------------------------------
     // Hybrid model: USE (if available) + TF-IDF + fuzzy
