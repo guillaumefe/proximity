@@ -1944,7 +1944,75 @@ You can also define abbreviations or translations."
       }
       return useModelPromise;
     }
+    
+// Estime automatiquement combien de comparaisons USE on accepte
+function estimateMaxUseComparisons() {
+  // base "moyenne" pour un laptop correcte
+  let base = 20000;
 
+  // 1) Adapter en fonction du nombre de cœurs
+  const cores = (navigator && navigator.hardwareConcurrency) || 4;
+  // On plafonne à 8 cœurs pour éviter les excès
+  const coreFactor = Math.min(cores, 8) / 4; // 4 cœurs = factor 1
+  base *= coreFactor;
+
+  // 2) Détecter (grossièrement) le mobile
+  const ua = (navigator && navigator.userAgent) || "";
+  const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
+  if (isMobile) {
+    base *= 0.5; // on divise par 2 sur mobile
+  }
+
+  // 3) Utiliser la mémoire si dispo (Chrome, Edge, etc.)
+  // deviceMemory est en Go (2, 4, 8, 16…)
+  const mem = navigator.deviceMemory || 4;
+  if (mem <= 2) {
+    base *= 0.5; // petites machines
+  } else if (mem >= 8) {
+    base *= 1.5; // grosses machines
+  }
+
+  // 4) bornes de sécurité (éviter les valeurs débiles)
+  base = Math.max(base, 8000);   // minimum 8k comparaisons
+  base = Math.min(base, 80000);  // maximum 80k comparaisons
+
+  const maxComparisons = Math.round(base);
+  console.log("[List matcher] MAX_USE_COMPARISONS auto =", maxComparisons);
+  return maxComparisons;
+}
+
+// ------------------------------------------------------------
+// Estimation automatique du budget USE selon la machine
+// ------------------------------------------------------------
+function estimateMaxUseComparisons() {
+  let base = 20000; // valeur de départ
+
+  // 1) CPU
+  const cores = navigator.hardwareConcurrency || 4;
+  const coreFactor = Math.min(cores, 8) / 4;
+  base *= coreFactor;
+
+  // 2) Mobile = beaucoup plus petit
+  const ua = navigator.userAgent || "";
+  const isMobile = /Mobi|Android|iPhone|iPad/i.test(ua);
+  if (isMobile) base *= 0.5;
+
+  // 3) RAM si dispo (Chrome etc.)
+  const mem = navigator.deviceMemory || 4;
+  if (mem <= 2) base *= 0.5;
+  else if (mem >= 8) base *= 1.5;
+
+  // 4) Bornes de sécurité
+  base = Math.max(8000, Math.min(base, 80000));
+
+  const result = Math.round(base);
+  console.log("[AUTO] MAX_USE_COMPARISONS =", result);
+  return result;
+}
+
+// ------------------------------------------------------------
+// computeMatches() — VERSION AUTO + OPTIMISÉE
+// ------------------------------------------------------------
 async function computeMatches(listA, listB, threshold) {
   const canUseUSE = typeof use !== "undefined" && typeof tf !== "undefined";
 
@@ -1961,11 +2029,12 @@ async function computeMatches(listA, listB, threshold) {
     };
   }
 
-  // Limite pour éviter d’exploser le navigateur avec USE
-  // (par ex. 200 x 200 = 40 000 comparaisons)
-  const MAX_USE_COMPARISONS = 40000;
+  // AUTO : budget maximum pour USE
+  const MAX_USE_COMPARISONS = estimateMaxUseComparisons();
 
-  // 1) Tentative avec Universal Sentence Encoder (si dispo et taille raisonnable)
+  // ------------------------------------------------------------
+  // 1) USE (si disponible + taille raisonnable)
+  // ------------------------------------------------------------
   if (canUseUSE && nA * nB <= MAX_USE_COMPARISONS) {
     try {
       const model = await getUseModel();
@@ -1976,25 +2045,24 @@ async function computeMatches(listA, listB, threshold) {
       const dim = embeddings.shape[1];
 
       const result = tf.tidy(() => {
-        // Séparer A et B
-        const embA = embeddings.slice([0, 0], [nA, dim]);   // [nA, dim]
-        const embB = embeddings.slice([nA, 0], [nB, dim]);  // [nB, dim]
+        const embA = embeddings.slice([0, 0], [nA, dim]);
+        const embB = embeddings.slice([nA, 0], [nB, dim]);
 
-        // Normalisation L2 par ligne
-        const normA = embA.norm("euclidean", 1).expandDims(1); // [nA, 1]
-        const normB = embB.norm("euclidean", 1).expandDims(1); // [nB, 1]
+        // Normalisation L2 ligne par ligne
+        const normA = embA.norm("euclidean", 1).expandDims(1);
+        const normB = embB.norm("euclidean", 1).expandDims(1);
 
         const embA_norm = embA.div(normA);
         const embB_norm = embB.div(normB);
 
-        // Matrice des similarités cosinus : [nA, nB]
+        // Matrice des similarités : [nA, nB]
         const simMatrix = embA_norm.matMul(embB_norm, false, true);
-        const sims = simMatrix.arraySync(); // tableau JS 2D
+        const sims = simMatrix.arraySync();
 
         const matchesFromA = [];
         const matchesFromB = [];
 
-        // A -> B : pour chaque ligne de listA, meilleur match dans listB
+        // A -> B
         for (let i = 0; i < nA; i++) {
           let bestScore = -1;
           let bestIdx = null;
@@ -2005,14 +2073,14 @@ async function computeMatches(listA, listB, threshold) {
               bestIdx = j;
             }
           }
-          if (bestIdx !== null && bestScore >= threshold) {
-            matchesFromA.push({ fromIndex: i, toIndex: bestIdx, score: bestScore });
-          } else {
-            matchesFromA.push({ fromIndex: i, toIndex: null, score: bestScore });
-          }
+          matchesFromA.push({
+            fromIndex: i,
+            toIndex: bestScore >= threshold ? bestIdx : null,
+            score: bestScore
+          });
         }
 
-        // B -> A : pour chaque ligne de listB, meilleur match dans listA
+        // B -> A
         for (let j = 0; j < nB; j++) {
           let bestScore = -1;
           let bestIdx = null;
@@ -2023,18 +2091,17 @@ async function computeMatches(listA, listB, threshold) {
               bestIdx = i;
             }
           }
-          if (bestIdx !== null && bestScore >= threshold) {
-            matchesFromB.push({ fromIndex: j, toIndex: bestIdx, score: bestScore });
-          } else {
-            matchesFromB.push({ fromIndex: j, toIndex: null, score: bestScore });
-          }
+          matchesFromB.push({
+            fromIndex: j,
+            toIndex: bestScore >= threshold ? bestIdx : null,
+            score: bestScore
+          });
         }
 
         return { matchesFromA, matchesFromB };
       });
 
-      // On libère le gros tenseur d’embeddings
-      embeddings.dispose();
+      embeddings.dispose(); // libération mémoire TFJS
 
       updateStats(nA, nB, 0, threshold);
       return {
@@ -2043,12 +2110,14 @@ async function computeMatches(listA, listB, threshold) {
         vocabSize: 0
       };
     } catch (err) {
-      console.error("Error with USE/TFJS, falling back to TF-IDF:", err);
-      // On laisse filer vers la partie TF-IDF
+      console.error("USE failed, fallback to TF-IDF:", err);
+      // → continue vers TF-IDF
     }
   }
 
-  // 2) Fallback : TF-IDF + fuzzy (version JS pure)
+  // ------------------------------------------------------------
+  // 2) Fallback TF-IDF + Fuzzy
+  // ------------------------------------------------------------
   const listTokensA = listA.map(tokenize);
   const listTokensB = listB.map(tokenize);
   const allTokens = [...listTokensA, ...listTokensB];
@@ -2061,8 +2130,8 @@ async function computeMatches(listA, listB, threshold) {
   const matchesFromA = [];
   const matchesFromB = [];
 
-  const alpha = 0.7; // poids “sémantique” (TF-IDF)
-  const beta = 0.3;  // poids fuzzy (Levenshtein brut)
+  const alpha = 0.7; // semantic weight
+  const beta = 0.3;  // fuzzy weight
 
   // A -> B
   for (let i = 0; i < nA; i++) {
@@ -2077,11 +2146,11 @@ async function computeMatches(listA, listB, threshold) {
         bestIdx = j;
       }
     }
-    if (bestIdx !== null && bestScore >= threshold) {
-      matchesFromA.push({ fromIndex: i, toIndex: bestIdx, score: bestScore });
-    } else {
-      matchesFromA.push({ fromIndex: i, toIndex: null, score: bestScore });
-    }
+    matchesFromA.push({
+      fromIndex: i,
+      toIndex: bestScore >= threshold ? bestIdx : null,
+      score: bestScore
+    });
   }
 
   // B -> A
@@ -2097,17 +2166,16 @@ async function computeMatches(listA, listB, threshold) {
         bestIdx = i;
       }
     }
-    if (bestIdx !== null && bestScore >= threshold) {
-      matchesFromB.push({ fromIndex: j, toIndex: bestIdx, score: bestScore });
-    } else {
-      matchesFromB.push({ fromIndex: j, toIndex: null, score: bestScore });
-    }
+    matchesFromB.push({
+      fromIndex: j,
+      toIndex: bestScore >= threshold ? bestIdx : null,
+      score: bestScore
+    });
   }
 
   updateStats(nA, nB, vocabSize, threshold);
   return { matchesFromA, matchesFromB, vocabSize };
 }
-
     // ---------------------------------------------------
     // UI state, rendering & YAML export
     // ---------------------------------------------------
