@@ -2010,12 +2010,37 @@ function estimateMaxUseComparisons() {
   return result;
 }
 
+function estimateUseLimit() {
+  let base = 8000;
+
+  const cores = navigator.hardwareConcurrency || 4;
+  const mem   = navigator.deviceMemory || 4;
+  const ua    = navigator.userAgent || "";
+  const isMobile = /Mobi|Android|iPhone|iPad/i.test(ua);
+
+  // CPU
+  base *= Math.min(cores, 8) / 4;
+
+  // RAM
+  if (mem >= 8) base *= 1.5;
+  if (mem <= 2) base *= 0.5;
+
+  // Mobile = plus prudent
+  if (isMobile) base *= 0.6;
+
+  // Bornes
+  base = Math.max(4000, Math.min(base, 50000));
+
+  const limit = Math.round(base);
+  console.log("[AUTO] USE limit =", limit, "comparisons (nA * nB)");
+  return limit;
+}
+
 // ------------------------------------------------------------
 // computeMatches() — VERSION AUTO + OPTIMISÉE
 // ------------------------------------------------------------
 async function computeMatches(listA, listB, threshold, onProgress) {
-  const progress =
-    typeof onProgress === "function" ? onProgress : () => {};
+  const progress = typeof onProgress === "function" ? onProgress : () => {};
 
   const nA = listA.length;
   const nB = listB.length;
@@ -2030,13 +2055,13 @@ async function computeMatches(listA, listB, threshold, onProgress) {
     };
   }
 
-  // ------------------------------------------------------------
-  // 0) Optionnel : USE seulement pour très petits inputs
-  // ------------------------------------------------------------
   const canUseUSE = typeof use !== "undefined" && typeof tf !== "undefined";
-  const SMALL_USE_LIMIT = 2000; // nb max de comparaisons pour essayer USE
+  const useLimit = estimateUseLimit(); // limite dynamique pour USE
 
-  if (canUseUSE && nA * nB <= SMALL_USE_LIMIT) {
+  // ------------------------------------------------------------
+  // 1) Tentative USE (si dispo + taille raisonnable)
+  // ------------------------------------------------------------
+  if (canUseUSE && nA * nB <= useLimit) {
     try {
       progress({ phase: "USE", done: 0, total: 1 });
 
@@ -2056,7 +2081,7 @@ async function computeMatches(listA, listB, threshold, onProgress) {
         const embB_norm = embB.div(normB);
 
         const simMatrix = embA_norm.matMul(embB_norm, false, true);
-        const sims = simMatrix.arraySync();
+        const sims = simMatrix.arraySync(); // [nA][nB]
 
         const matchesFromA = [];
         const matchesFromB = [];
@@ -2103,27 +2128,27 @@ async function computeMatches(listA, listB, threshold, onProgress) {
       embeddings.dispose();
 
       progress({ phase: "USE", done: 1, total: 1 });
-
       updateStats(nA, nB, 0, threshold);
+
       return {
         matchesFromA: result.matchesFromA,
         matchesFromB: result.matchesFromB,
         vocabSize: 0
       };
     } catch (err) {
-      console.error("USE failed, fallback to TF-IDF:", err);
-      // on tombe sur TF-IDF incrémental
+      console.error("USE failed, fallback TF-IDF:", err);
+      // on tombe sur TF-IDF ci-dessous
     }
   }
 
   // ------------------------------------------------------------
-  // 1) Préparation TF-IDF (phase rapide mais bloquante)
+  // 2) TF-IDF + fuzzy avec BATCH dynamique
   // ------------------------------------------------------------
   progress({ phase: "prepare", done: 0, total: 3 });
 
   const listTokensA = listA.map(tokenize);
   const listTokensB = listB.map(tokenize);
-  const allTokens = [...listTokensA, ...listTokensB];
+  const allTokens   = [...listTokensA, ...listTokensB];
 
   const { vectors, vocabSize } = computeTfidfVectors(allTokens);
 
@@ -2132,21 +2157,26 @@ async function computeMatches(listA, listB, threshold, onProgress) {
 
   progress({ phase: "prepare", done: 1, total: 3 });
 
-  // ------------------------------------------------------------
-  // 2) Matching incrémental A -> B
-  // ------------------------------------------------------------
   const matchesFromA = [];
   const matchesFromB = [];
 
   const alpha = 0.6; // TF-IDF
-  const beta = 0.4;  // fuzzy
+  const beta  = 0.4; // fuzzy
 
-  const BATCH = 20; // nb d’éléments traités avant de rendre la main
+  // Batch dynamique
+  let batchSize       = 16;
+  const minBatch      = 4;
+  const maxBatch      = 256;
+  const targetChunkMs = 30; // temps de travail visé avant de rendre la main
 
-  // A -> B
+  let lastYield = performance.now();
+  let iterSinceYield = 0;
+
+  // ---------------- A -> B ----------------
   for (let i = 0; i < nA; i++) {
     let bestScore = 0;
     let bestIdx = null;
+
     for (let j = 0; j < nB; j++) {
       const s1 = cosineSimilarity(vecA[i], vecB[j]);
       const s2 = fuzzySimilarity(listA[i], listB[j]);
@@ -2163,29 +2193,36 @@ async function computeMatches(listA, listB, threshold, onProgress) {
       score: bestScore
     });
 
-    if (i % BATCH === BATCH - 1) {
-      progress({
-        phase: "A->B",
-        done: i + 1,
-        total: nA + nB
-      });
-      // on rend la main au navigateur pour éviter le freeze
+    iterSinceYield++;
+    const now = performance.now();
+    if (now - lastYield > targetChunkMs && iterSinceYield >= batchSize) {
+      // ajuster le batch en fonction du temps réel
+      const spent = now - lastYield;
+      if (spent < targetChunkMs / 2 && batchSize < maxBatch) {
+        batchSize = Math.min(maxBatch, batchSize * 2);
+      } else if (spent > targetChunkMs * 2 && batchSize > minBatch) {
+        batchSize = Math.max(minBatch, Math.floor(batchSize / 2));
+      }
+      lastYield = now;
+      iterSinceYield = 0;
+
+      progress({ phase: "A->B", done: i + 1, total: nA + nB });
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
   }
 
-  progress({
-    phase: "A->B",
-    done: nA,
-    total: nA + nB
-  });
+  progress({ phase: "A->B", done: nA, total: nA + nB });
 
-  // ------------------------------------------------------------
-  // 3) Matching incrémental B -> A
-  // ------------------------------------------------------------
+  // reset pour la deuxième boucle
+  batchSize = Math.max(minBatch, batchSize);
+  lastYield = performance.now();
+  iterSinceYield = 0;
+
+  // ---------------- B -> A ----------------
   for (let j = 0; j < nB; j++) {
     let bestScore = 0;
     let bestIdx = null;
+
     for (let i = 0; i < nA; i++) {
       const s1 = cosineSimilarity(vecB[j], vecA[i]);
       const s2 = fuzzySimilarity(listB[j], listA[i]);
@@ -2202,21 +2239,24 @@ async function computeMatches(listA, listB, threshold, onProgress) {
       score: bestScore
     });
 
-    if (j % BATCH === BATCH - 1) {
-      progress({
-        phase: "B->A",
-        done: nA + j + 1,
-        total: nA + nB
-      });
+    iterSinceYield++;
+    const now = performance.now();
+    if (now - lastYield > targetChunkMs && iterSinceYield >= batchSize) {
+      const spent = now - lastYield;
+      if (spent < targetChunkMs / 2 && batchSize < maxBatch) {
+        batchSize = Math.min(maxBatch, batchSize * 2);
+      } else if (spent > targetChunkMs * 2 && batchSize > minBatch) {
+        batchSize = Math.max(minBatch, Math.floor(batchSize / 2));
+      }
+      lastYield = now;
+      iterSinceYield = 0;
+
+      progress({ phase: "B->A", done: nA + j + 1, total: nA + nB });
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
   }
 
-  progress({
-    phase: "B->A",
-    done: nA + nB,
-    total: nA + nB
-  });
+  progress({ phase: "B->A", done: nA + nB, total: nA + nB });
 
   updateStats(nA, nB, vocabSize, threshold);
   return { matchesFromA, matchesFromB, vocabSize };
