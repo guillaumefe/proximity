@@ -1742,13 +1742,13 @@ You can also define abbreviations or translations."
       "very","too","just","more","less"
     ]);
 
-    function normalizeText(text) {
-      return text
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9'\s-]/g, " ");
-    }
+function normalizeText(text) {
+  return (text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")        // enlever accents
+    .replace(/[^a-z0-9'\s-]/g, " ");        // ICI : \s et pas \\s
+}
 
     function simpleStem(token) {
       let t = token;
@@ -1761,18 +1761,18 @@ You can also define abbreviations or translations."
       return t || token;
     }
 
-    function tokenize(text) {
-      const normalized = normalizeText(text);
-      const rawTokens = normalized.split(/\\s+/).filter(Boolean);
-      const tokens = [];
-      for (const tok of rawTokens) {
-        if (STOPWORDS_FR.has(tok) || STOPWORDS_EN.has(tok)) continue;
-        const stemmed = simpleStem(tok);
-        if (stemmed.length < 2) continue;
-        tokens.push(stemmed);
-      }
-      return tokens;
-    }
+function tokenize(text) {
+  const normalized = normalizeText(text);
+  const rawTokens = normalized.split(/\s+/).filter(Boolean); // ICI : \s+
+  const tokens = [];
+  for (const tok of rawTokens) {
+    if (STOPWORDS_FR.has(tok) || STOPWORDS_EN.has(tok)) continue;
+    const stemmed = simpleStem(tok);
+    if (stemmed.length < 2) continue;
+    tokens.push(stemmed);
+  }
+  return tokens;
+}
 
     function computeTfidfVectors(documentsTokens) {
       const vocabIndex = new Map();
@@ -1897,8 +1897,8 @@ You can also define abbreviations or translations."
     //   PM = Digital project manager
     //   Dev backend: Java backend developer
     function parseGlossary(text) {
-      return text
-        .split(/\r?\n/)
+      return (text || "")
+        .split(/\r?\n/)             // ICI aussi
         .map((line) => line.trim())
         .filter((line) => line.length > 0 && !line.startsWith("#"))
         .map((line) => {
@@ -2274,12 +2274,13 @@ async function computeMatches(listA, listB, threshold, onProgress) {
       statsThresholdEl.textContent = `Match threshold: ${threshold.toFixed(2)}`;
     }
 
-    function parseList(text) {
-      return text
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0);
-    }
+function parseList(text) {
+  return (text || "")
+    .split(/\r?\n/)             // ICI : \r?\n
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+}
+
 
     function formatScore(score) {
       if (!Number.isFinite(score)) return "0.00";
@@ -2557,11 +2558,11 @@ async function computeMatches(listA, listB, threshold, onProgress) {
         return originalRenderMatches(listA, listB, result);
       };
 
-      function toYamlScalar(str) {
-        const oneLine = String(str || "").replace(/\r?\n/g, " ");
-        const escaped = oneLine.replace(/\\\\/g, "\\\\").replace(/"/g, '\\"');
-        return `"${escaped}"`;
-      }
+    function toYamlScalar(str) {
+      const oneLine = String(str || "").replace(/\r?\n/g, " "); // ICI : \r?\n
+      const escaped = oneLine.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      return `"${escaped}"`;
+    }
 
       function downloadText(filename, text) {
         const blob = new Blob([text], { type: "text/yaml;charset=utf-8;" });
