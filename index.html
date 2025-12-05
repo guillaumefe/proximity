@@ -1,0 +1,2807 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <title>List match analyzer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta
+    name="description"
+    content="Client-side tool to analyze semantic similarity between two lists and detect best matches."
+  />
+  <!-- DARK THEME -->
+  <style>
+    :root {
+      --bg: #0f172a;
+      --bg-soft: #1f2937;
+      --bg-softer: #111827;
+      --accent: #38bdf8;
+      --accent-soft: rgba(56, 189, 248, 0.12);
+      --accent-strong: rgba(56, 189, 248, 0.3);
+      --text: #e5e7eb;
+      --text-soft: #9ca3af;
+      --border: #374151;
+      --danger: #fb7185;
+      --radius-lg: 14px;
+      --radius-xl: 18px;
+      --shadow-soft: 0 18px 45px rgba(15, 23, 42, 0.9);
+      --transition-fast: 0.15s ease-out;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top left, #1e293b, #020617);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 1240px;
+      background: linear-gradient(135deg, #020617 0%, #020617 50%, #020617 100%);
+      border-radius: 24px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      box-shadow: var(--shadow-soft);
+      padding: 22px 24px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    @media (max-width: 900px) {
+      body {
+        padding: 12px;
+      }
+      .app {
+        padding: 16px;
+        border-radius: 18px;
+      }
+    }
+
+    .app-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid rgba(55, 65, 81, 0.8);
+    }
+
+    .title-block {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .logo-pill {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 0% 0%, #38bdf8, #0ea5e9 40%, #1d4ed8 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.5),
+        0 10px 30px rgba(15, 23, 42, 0.9);
+      flex-shrink: 0;
+    }
+
+    .logo-pill span {
+      font-size: 18px;
+      font-weight: 700;
+      color: white;
+    }
+
+    .title-text h1 {
+      font-size: 19px;
+      margin: 0 0 2px;
+      letter-spacing: 0.01em;
+    }
+
+    .title-text p {
+      margin: 0;
+      font-size: 12px;
+      color: var(--text-soft);
+    }
+
+    .badge {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+      padding: 5px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.5);
+      color: #cbd5f5;
+      background: radial-gradient(circle at top, #1d283a, #020617);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      white-space: nowrap;
+    }
+
+    .badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #22c55e;
+      box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
+    }
+
+    .language-select {
+      font-size: 12px;
+      padding: 5px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.7);
+      background: rgba(15, 23, 42, 0.9);
+      color: var(--text);
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.1fr);
+      gap: 14px;
+      align-items: flex-start;
+    }
+
+    @media (max-width: 900px) {
+      .main-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .panel {
+      background: radial-gradient(circle at top left, #111827, #020617);
+      border-radius: var(--radius-xl);
+      border: 1px solid rgba(55, 65, 81, 0.95);
+      padding: 14px 14px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .panel::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at top left, rgba(56, 189, 248, 0.1), transparent 60%);
+      opacity: 0.7;
+      pointer-events: none;
+      mix-blend-mode: screen;
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 6px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .panel-header h2 {
+      font-size: 13px;
+      margin: 0;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .panel-header span {
+      font-size: 11px;
+      color: var(--text-soft);
+    }
+
+    .chip {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+      padding: 3px 7px;
+      border-radius: 999px;
+      border: 1px solid rgba(107, 114, 128, 0.8);
+      color: var(--text-soft);
+      background: rgba(15, 23, 42, 0.9);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .chip span {
+      font-size: 12px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 170px;
+      border-radius: 12px;
+      border: 1px solid rgba(55, 65, 81, 0.95);
+      background: rgba(15, 23, 42, 0.95);
+      color: var(--text);
+      padding: 10px 11px;
+      font-size: 13px;
+      resize: vertical;
+      outline: none;
+      line-height: 1.4;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        "Liberation Mono", "Courier New", monospace;
+      position: relative;
+      z-index: 1;
+    }
+
+    textarea::placeholder {
+      color: rgba(148, 163, 184, 0.6);
+      font-size: 12px;
+    }
+
+    textarea:focus-visible {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.6),
+        0 0 0 16px rgba(56, 189, 248, 0.08);
+      background: rgba(15, 23, 42, 0.98);
+      outline: none;
+    }
+
+    .hint {
+      font-size: 11px;
+      color: var(--text-soft);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hint-key {
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+      border-radius: 5px;
+      border: 1px solid rgba(75, 85, 99, 0.9);
+      padding: 2px 6px;
+      background: rgba(15, 23, 42, 0.9);
+      color: #e5e7eb;
+    }
+
+    .controls-column {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .analyze-card {
+      background: radial-gradient(circle at top right, #0f172a, #020617);
+      border-radius: var(--radius-xl);
+      border: 1px solid rgba(55, 65, 81, 0.95);
+      padding: 13px 12px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .analyze-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 10% -10%, rgba(56, 189, 248, 0.45), transparent 45%),
+        radial-gradient(circle at 80% 120%, rgba(129, 140, 248, 0.45), transparent 40%);
+      opacity: 0.7;
+      pointer-events: none;
+      mix-blend-mode: screen;
+    }
+
+    .analyze-card-inner {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .analyze-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .analyze-title {
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .spark {
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      border: 1px solid rgba(248, 250, 252, 0.6);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at 30% 0%, #e5e7eb, #38bdf8 40%, #1e3a8a 100%);
+      box-shadow: 0 0 0 8px rgba(15, 23, 42, 0.8);
+      font-size: 15px;
+    }
+
+    .stats-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-size: 11px;
+      color: #e5e7eb;
+    }
+
+    .stat-pill {
+      padding: 4px 7px;
+      border-radius: 999px;
+      border: 1px solid rgba(15, 23, 42, 0.8);
+      background: rgba(15, 23, 42, 0.9);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      backdrop-filter: blur(4px);
+      white-space: nowrap;
+    }
+
+    .stat-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .analyze-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .button-primary {
+      flex: 1;
+      min-width: 120px;
+      border-radius: 999px;
+      border: none;
+      padding: 9px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      background: linear-gradient(135deg, #38bdf8, #0ea5e9, #6366f1);
+      color: #0b1120;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.8);
+      transition: transform var(--transition-fast), box-shadow var(--transition-fast),
+        filter var(--transition-fast), opacity var(--transition-fast);
+    }
+
+    .button-primary span.icon {
+      font-size: 15px;
+    }
+
+    .button-primary:hover:not(:disabled) {
+      transform: translateY(-1px);
+      filter: brightness(1.05);
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.9);
+    }
+
+    .button-primary:active:not(:disabled) {
+      transform: translateY(0px) scale(0.99);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.9);
+    }
+
+    .button-primary:disabled {
+      opacity: 0.5;
+      cursor: default;
+      box-shadow: none;
+    }
+
+    .button-primary:focus-visible,
+    .chip:focus-visible,
+    .tab-button:focus-visible,
+    .language-select:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .small-note {
+      font-size: 10px;
+      color: var(--text-soft);
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .small-note strong {
+      font-weight: 600;
+      color: #e5e7eb;
+    }
+
+    .small-note span {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .tiny-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    /* RESULTS */
+
+    .results-card {
+      background: radial-gradient(circle at bottom left, #020617, #020617 50%, #020617 100%);
+      border-radius: var(--radius-xl);
+      border: 1px solid rgba(55, 65, 81, 0.95);
+      padding: 14px 13px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      position: relative;
+      overflow: hidden;
+      min-height: 130px;
+    }
+
+    .results-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at bottom left, rgba(56, 189, 248, 0.2), transparent 55%);
+      opacity: 0.5;
+      pointer-events: none;
+      mix-blend-mode: screen;
+    }
+
+    .results-header {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .results-header-left {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .results-header-left h2 {
+      font-size: 13px;
+      margin: 0;
+      font-weight: 600;
+    }
+
+    .results-header-left p {
+      font-size: 11px;
+      margin: 0;
+      color: var(--text-soft);
+    }
+
+    .results-badge {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 4px 7px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.7);
+      background: rgba(15, 23, 42, 0.96);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+
+    .results-tabs {
+      position: relative;
+      z-index: 1;
+      display: inline-flex;
+      padding: 3px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid rgba(55, 65, 81, 0.9);
+      gap: 2px;
+    }
+
+    .tab-button {
+      border-radius: 999px;
+      border: none;
+      padding: 4px 10px;
+      font-size: 11px;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text-soft);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background var(--transition-fast), color var(--transition-fast),
+        transform var(--transition-fast), box-shadow var(--transition-fast);
+      white-space: nowrap;
+    }
+
+    .tab-button span.count {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.9);
+    }
+
+    .tab-button.active {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(59, 130, 246, 0.22));
+      color: #e5e7eb;
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.7);
+      transform: translateY(-0.5px);
+    }
+
+    .results-body {
+      position: relative;
+      z-index: 1;
+      margin-top: 4px;
+    }
+
+    .results-list {
+      display: none;
+      max-height: 260px;
+      overflow: auto;
+      padding-right: 3px;
+    }
+
+    .results-list.active {
+      display: block;
+    }
+
+    .match-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr);
+      gap: 6px;
+      align-items: stretch;
+      margin-bottom: 6px;
+    }
+
+    @media (max-width: 700px) {
+      .match-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .item-card {
+      border-radius: 11px;
+      border: 1px solid rgba(55, 65, 81, 0.95);
+      background: rgba(15, 23, 42, 0.96);
+      padding: 7px 8px 7px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .item-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-soft);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .item-label strong {
+      color: #e5e7eb;
+      font-weight: 600;
+    }
+
+    .item-text {
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .score-pill {
+      font-size: 10px;
+      border-radius: 999px;
+      padding: 2px 6px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(55, 65, 81, 0.9);
+      color: var(--text-soft);
+    }
+
+    .score-pill strong {
+      color: #e5e7eb;
+    }
+
+    .arrow-cell {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      color: rgba(148, 163, 184, 0.9);
+    }
+
+    .arrow-pill {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      border: 1px solid rgba(75, 85, 99, 0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 23, 42, 0.96);
+    }
+
+    .no-match {
+      font-size: 11px;
+      color: rgba(248, 113, 113, 0.9);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .no-match-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(248, 113, 113, 0.9);
+    }
+
+    .empty-state {
+      font-size: 12px;
+      color: var(--text-soft);
+      text-align: left;
+      padding: 5px 1px 2px;
+    }
+
+    .footer {
+      margin-top: -2px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      font-size: 10px;
+      color: var(--text-soft);
+      padding-top: 4px;
+      border-top: 1px solid rgba(31, 41, 55, 0.9);
+      flex-wrap: wrap;
+    }
+
+    .footer span {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .footer-code {
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(55, 65, 81, 0.9);
+      padding: 2px 7px;
+      background: rgba(15, 23, 42, 0.96);
+      color: var(--text-soft);
+    }
+
+    .badge-strong {
+      color: #fecaca;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+  </style>
+
+  <!-- LIGHT THEME -->
+  <style>
+    :root {
+      --bg: #f3f4f6;
+      --bg-soft: #ffffff;
+      --bg-softer: #e5e7eb;
+      --accent: #3b82f6;
+      --accent-soft: rgba(59, 130, 246, 0.12);
+      --accent-strong: rgba(59, 130, 246, 0.28);
+      --text: #111827;
+      --text-soft: #6b7280;
+      --border: #e5e7eb;
+      --danger: #ef4444;
+      --radius-lg: 14px;
+      --radius-xl: 18px;
+      --shadow-soft: 0 18px 45px rgba(15, 23, 42, 0.08);
+      --transition-fast: 0.15s ease-out;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top left, #e0f2fe, #f9fafb);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 1240px;
+      background: linear-gradient(
+        135deg,
+        #ffffff 0%,
+        #f9fafb 40%,
+        #eff6ff 100%
+      );
+      border-radius: 24px;
+      border: 1px solid rgba(148, 163, 184, 0.4);
+      box-shadow: var(--shadow-soft);
+      padding: 22px 24px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    @media (max-width: 900px) {
+      body {
+        padding: 12px;
+      }
+      .app {
+        padding: 16px;
+        border-radius: 18px;
+      }
+    }
+
+    .app-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid rgba(209, 213, 219, 0.9);
+    }
+
+    .title-block {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .logo-pill {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: conic-gradient(
+        from 180deg,
+        #f97316,
+        #ec4899,
+        #6366f1,
+        #22c55e,
+        #f97316
+      );
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow:
+        0 0 0 2px rgba(59, 130, 246, 0.35),
+        0 10px 25px rgba(15, 23, 42, 0.18);
+      flex-shrink: 0;
+    }
+
+    .logo-pill span {
+      font-size: 18px;
+      font-weight: 700;
+      color: white;
+    }
+
+    .title-text h1 {
+      font-size: 19px;
+      margin: 0 0 2px;
+      letter-spacing: 0.01em;
+      color: var(--text);
+    }
+
+    .title-text p {
+      margin: 0;
+      font-size: 12px;
+      color: var(--text-soft);
+    }
+
+    .badge {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+      padding: 5px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.6);
+      color: #0369a1;
+      background: radial-gradient(circle at top, #e0f2fe, #ffffff);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      white-space: nowrap;
+    }
+
+    .badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #22c55e;
+      box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.15);
+    }
+
+    .language-select {
+      font-size: 12px;
+      padding: 5px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.8);
+      background: #ffffff;
+      color: var(--text);
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.1fr);
+      gap: 14px;
+      align-items: flex-start;
+    }
+
+    @media (max-width: 900px) {
+      .main-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .panel {
+      background: radial-gradient(circle at top left, #eff6ff, #ffffff);
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--border);
+      padding: 14px 14px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .panel::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(
+        circle at top left,
+        rgba(59, 130, 246, 0.15),
+        transparent 60%
+      );
+      opacity: 0.8;
+      pointer-events: none;
+      mix-blend-mode: screen;
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 6px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .panel-header h2 {
+      font-size: 13px;
+      margin: 0;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text);
+    }
+
+    .panel-header span {
+      font-size: 11px;
+      color: var(--text-soft);
+    }
+
+    .chip {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+      padding: 3px 7px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.9);
+      color: var(--text-soft);
+      background: #f9fafb;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .chip span {
+      font-size: 12px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 170px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #ffffff;
+      color: var(--text);
+      padding: 10px 11px;
+      font-size: 13px;
+      resize: vertical;
+      outline: none;
+      line-height: 1.4;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        "Liberation Mono", "Courier New", monospace;
+      position: relative;
+      z-index: 1;
+    }
+
+    textarea::placeholder {
+      color: rgba(156, 163, 175, 0.9);
+      font-size: 12px;
+    }
+
+    textarea:focus-visible {
+      border-color: var(--accent);
+      box-shadow:
+        0 0 0 1px rgba(59, 130, 246, 0.7),
+        0 0 0 10px rgba(59, 130, 246, 0.1);
+      background: #ffffff;
+      outline: none;
+    }
+
+    .hint {
+      font-size: 11px;
+      color: var(--text-soft);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hint-key {
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+      border-radius: 5px;
+      border: 1px solid rgba(209, 213, 219, 0.9);
+      padding: 2px 6px;
+      background: #ffffff;
+      color: #111827;
+    }
+
+    .controls-column {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .analyze-card {
+      background: radial-gradient(circle at top right, #eef2ff, #fff7ed);
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--border);
+      padding: 13px 12px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .analyze-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 10% -10%, rgba(59, 130, 246, 0.45), transparent 45%),
+        radial-gradient(circle at 80% 120%, rgba(244, 114, 182, 0.45), transparent 40%);
+      opacity: 0.6;
+      pointer-events: none;
+      mix-blend-mode: screen;
+    }
+
+    .analyze-card-inner {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .analyze-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .analyze-title {
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text);
+    }
+
+    .spark {
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.8);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(
+        circle at 30% 0%,
+        #fefce8,
+        #fbbf24 40%,
+        #f97316 100%
+      );
+      box-shadow: 0 0 0 6px rgba(251, 191, 36, 0.25);
+      font-size: 15px;
+    }
+
+    .stats-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--text);
+    }
+
+    .stat-pill {
+      padding: 4px 7px;
+      border-radius: 999px;
+      border: 1px solid rgba(209, 213, 219, 0.9);
+      background: rgba(249, 250, 251, 0.95);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      backdrop-filter: blur(4px);
+      white-space: nowrap;
+    }
+
+    .stat-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .analyze-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .button-primary {
+      flex: 1;
+      min-width: 120px;
+      border-radius: 999px;
+      border: none;
+      padding: 9px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      background: linear-gradient(135deg, #3b82f6, #6366f1, #ec4899);
+      color: #ffffff;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 12px 24px rgba(129, 140, 248, 0.35);
+      transition:
+        transform var(--transition-fast),
+        box-shadow var(--transition-fast),
+        filter var(--transition-fast),
+        opacity var(--transition-fast);
+    }
+
+    .button-primary span.icon {
+      font-size: 15px;
+    }
+
+    .button-primary:hover:not(:disabled) {
+      transform: translateY(-1px);
+      filter: brightness(1.05);
+      box-shadow: 0 18px 32px rgba(129, 140, 248, 0.45);
+    }
+
+    .button-primary:active:not(:disabled) {
+      transform: translateY(0px) scale(0.99);
+      box-shadow: 0 8px 18px rgba(129, 140, 248, 0.4);
+    }
+
+    .button-primary:disabled {
+      opacity: 0.55;
+      cursor: default;
+      box-shadow: none;
+    }
+
+    .button-primary:focus-visible,
+    .chip:focus-visible,
+    .tab-button:focus-visible,
+    .language-select:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .small-note {
+      font-size: 10px;
+      color: var(--text-soft);
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .small-note strong {
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .small-note span {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .tiny-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    /* RESULTS */
+
+    .results-card {
+      background: radial-gradient(circle at bottom left, #ffffff, #f9fafb 55%);
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--border);
+      padding: 14px 13px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      position: relative;
+      overflow: hidden;
+      min-height: 130px;
+    }
+
+    .results-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(
+        circle at bottom left,
+        rgba(59, 130, 246, 0.22),
+        transparent 60%
+      );
+      opacity: 0.5;
+      pointer-events: none;
+      mix-blend-mode: screen;
+    }
+
+    .results-header {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .results-header-left {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .results-header-left h2 {
+      font-size: 13px;
+      margin: 0;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .results-header-left p {
+      font-size: 11px;
+      margin: 0;
+      color: var(--text-soft);
+    }
+
+    .results-badge {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 4px 7px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.8);
+      background: #eff6ff;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+      color: #1d4ed8;
+    }
+
+    .results-tabs {
+      position: relative;
+      z-index: 1;
+      display: inline-flex;
+      padding: 3px;
+      border-radius: 999px;
+      background: #f3f4f6;
+      border: 1px solid rgba(209, 213, 219, 0.9);
+      gap: 2px;
+    }
+
+    .tab-button {
+      border-radius: 999px;
+      border: none;
+      padding: 4px 10px;
+      font-size: 11px;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text-soft);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition:
+        background var(--transition-fast),
+        color var(--transition-fast),
+        transform var(--transition-fast),
+        box-shadow var(--transition-fast);
+      white-space: nowrap;
+    }
+
+    .tab-button span.count {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: #e5e7eb;
+    }
+
+    .tab-button.active {
+      background: linear-gradient(
+        135deg,
+        rgba(59, 130, 246, 0.18),
+        rgba(96, 165, 250, 0.25)
+      );
+      color: #1f2937;
+      box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.8);
+      transform: translateY(-0.5px);
+    }
+
+    .results-body {
+      position: relative;
+      z-index: 1;
+      margin-top: 4px;
+    }
+
+    .results-list {
+      display: none;
+      max-height: 260px;
+      overflow: auto;
+      padding-right: 3px;
+    }
+
+    .results-list.active {
+      display: block;
+    }
+
+    .match-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr);
+      gap: 6px;
+      align-items: stretch;
+      margin-bottom: 6px;
+    }
+
+    @media (max-width: 700px) {
+      .match-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .item-card {
+      border-radius: 11px;
+      border: 1px solid var(--border);
+      background: #f9fafb;
+      padding: 7px 8px 7px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .item-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-soft);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .item-label strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .item-text {
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      color: var(--text);
+    }
+
+    .score-pill {
+      font-size: 10px;
+      border-radius: 999px;
+      padding: 2px 6px;
+      background: #ffffff;
+      border: 1px solid rgba(209, 213, 219, 0.9);
+      color: var(--text-soft);
+    }
+
+    .score-pill strong {
+      color: var(--text);
+    }
+
+    .arrow-cell {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      color: rgba(148, 163, 184, 0.9);
+    }
+
+    .arrow-pill {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      border: 1px solid rgba(209, 213, 219, 0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #ffffff;
+    }
+
+    .no-match {
+      font-size: 11px;
+      color: rgba(185, 28, 28, 0.95);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .no-match-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(248, 113, 113, 0.9);
+    }
+
+    .empty-state {
+      font-size: 12px;
+      color: var(--text-soft);
+      text-align: left;
+      padding: 5px 1px 2px;
+    }
+
+    .footer {
+      margin-top: -2px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      font-size: 10px;
+      color: var(--text-soft);
+      padding-top: 4px;
+      border-top: 1px solid rgba(229, 231, 235, 0.9);
+      flex-wrap: wrap;
+    }
+
+    .footer span {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .footer-code {
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(209, 213, 219, 0.9);
+      padding: 2px 7px;
+      background: #f9fafb;
+      color: var(--text-soft);
+    }
+
+    .badge-strong {
+      color: #b91c1c;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+  </style>
+</head>
+<body>
+  <main class="app" role="main">
+    <header class="app-header" aria-label="List matching tool header">
+      <div class="title-block">
+        <div class="logo-pill" aria-hidden="true">
+          <span>Σ</span>
+        </div>
+        <div class="title-text">
+          <h1
+            data-i18n="app.title"
+          >
+            List match analyzer
+          </h1>
+          <p
+            data-i18n="app.subtitle"
+          >
+            Automatically matches the items of two lists using a semantic similarity score.
+          </p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="badge">
+          <span class="badge-dot" aria-hidden="true"></span>
+          <span data-i18n="app.badge">Local · 100% in your browser</span>
+        </div>
+        <label
+          for="languageSelect"
+          class="sr-only"
+          data-i18n="lang.selectorLabel"
+        >
+          Interface language
+        </label>
+        <select
+          id="languageSelect"
+          class="language-select"
+          aria-label="Interface language"
+          data-i18n="lang.selectorAriaLabel"
+          data-i18n-attr="aria-label"
+        >
+          <option value="en">English</option>
+          <option value="fr">Français</option>
+        </select>
+        <!-- theme toggle button will be injected here -->
+      </div>
+    </header>
+
+    <div class="main-grid" aria-label="Input lists">
+      <!-- LIST 1 -->
+      <section class="panel" aria-labelledby="listAHeading">
+        <div class="panel-header">
+          <div>
+            <h2 id="listAHeading">
+              <span data-i18n="list1.title">List 1</span>
+              <span data-i18n="list1.source">(source A)</span>
+            </h2>
+            <span class="hint" id="listAHint">
+              <span class="hint-key">Enter ↵</span>
+              <span data-i18n="list.hint">1 item per line</span>
+            </span>
+          </div>
+          <div class="chip">
+            <span>①</span>
+            <span data-i18n="list1.chip">Input</span>
+          </div>
+        </div>
+        <textarea
+          id="listA"
+          aria-labelledby="listAHeading"
+          aria-describedby="listAHint"
+          data-i18n="list1.placeholder"
+          data-i18n-attr="placeholder"
+          placeholder="Example:
+Java backend developer
+Digital project manager
+Senior data analyst
+Cybersecurity consultant
+
+Each line is treated as a separate item."
+        ></textarea>
+      </section>
+
+      <!-- LIST 2 -->
+      <section class="panel" aria-labelledby="listBHeading">
+        <div class="panel-header">
+          <div>
+            <h2 id="listBHeading">
+              <span data-i18n="list2.title">List 2</span>
+              <span data-i18n="list2.source">(source B)</span>
+            </h2>
+            <span class="hint" id="listBHint">
+              <span class="hint-key">Enter ↵</span>
+              <span data-i18n="list.hint">1 item per line</span>
+            </span>
+          </div>
+          <div class="chip">
+            <span>②</span>
+            <span data-i18n="list2.chip">Reference</span>
+          </div>
+        </div>
+        <textarea
+          id="listB"
+          aria-labelledby="listBHeading"
+          aria-describedby="listBHint"
+          data-i18n="list2.placeholder"
+          data-i18n-attr="placeholder"
+          placeholder="Example:
+Java software engineer
+Web project lead
+Data analyst
+Information security consultant"
+        ></textarea>
+      </section>
+    </div>
+
+    <div class="main-grid" style="margin-top: 4px;">
+      <div class="controls-column">
+        <!-- ANALYZE CARD -->
+        <section
+          class="analyze-card"
+          aria-label="Semantic analysis configuration"
+        >
+          <div class="analyze-card-inner">
+            <div class="analyze-header">
+              <div class="analyze-title">
+                <div class="spark" aria-hidden="true">✦</div>
+                <div data-i18n="analyze.title">
+                  Semantic &amp; statistical analysis
+                </div>
+              </div>
+              <span class="results-badge" data-i18n="analyze.methods">
+                TF-IDF · Cosine · Normalization
+              </span>
+            </div>
+            <div class="stats-row" id="statsRow" aria-live="polite">
+              <div class="stat-pill">
+                <span class="stat-dot" aria-hidden="true"></span>
+                <span id="stats-counts" data-i18n="stats.counts">
+                  0 items in list 1 · 0 items in list 2
+                </span>
+              </div>
+              <div class="stat-pill">
+                <span aria-hidden="true">📚</span>
+                <span id="stats-vocab" data-i18n="stats.vocab">
+                  Vocabulary: — distinct terms
+                </span>
+              </div>
+              <div class="stat-pill">
+                <span aria-hidden="true">🎯</span>
+                <span id="stats-threshold" data-i18n="stats.threshold">
+                  Match threshold: 0.12
+                </span>
+              </div>
+            </div>
+            <div class="analyze-footer">
+              <button
+                id="analyzeBtn"
+                class="button-primary"
+                type="button"
+                data-i18n="analyze.button"
+              >
+                <span class="icon" aria-hidden="true">➜</span>
+                <span>Run matching analysis</span>
+              </button>
+              <div class="small-note" aria-live="polite">
+                <span>
+                  <strong data-i18n="analyze.howTitle">
+                    How does it work?
+                  </strong>
+                </span>
+                <span>
+                  <span class="tiny-dot" aria-hidden="true"></span>
+                  <span data-i18n="analyze.howStep1">
+                    Text cleaning, stopword removal, TF-IDF weighting
+                  </span>
+                </span>
+                <span>
+                  <span class="tiny-dot" aria-hidden="true"></span>
+                  <span data-i18n="analyze.howStep2">
+                    Cosine similarity between each item of the two lists
+                  </span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- RESULTS -->
+      <section
+        class="results-card"
+        aria-label="Matching results"
+        role="region"
+      >
+        <div class="results-header">
+          <div class="results-header-left">
+            <h2 data-i18n="results.title">
+              Detected results &amp; matches
+            </h2>
+            <p
+              id="resultsSummary"
+              role="status"
+              aria-live="polite"
+              data-i18n="results.summaryInitial"
+            >
+              Matches will appear here after the analysis.
+            </p>
+          </div>
+          <div
+            class="results-tabs"
+            role="tablist"
+            aria-label="Result views"
+          >
+            <button
+              id="tab-viewA"
+              class="tab-button active"
+              data-tab="viewA"
+              role="tab"
+              aria-selected="true"
+              aria-controls="viewA"
+              tabindex="0"
+            >
+              <span data-i18n="results.viewA">View by list 1</span>
+              <span class="count" id="countA">0</span>
+            </button>
+            <button
+              id="tab-viewB"
+              class="tab-button"
+              data-tab="viewB"
+              role="tab"
+              aria-selected="false"
+              aria-controls="viewB"
+              tabindex="-1"
+            >
+              <span data-i18n="results.viewB">View by list 2</span>
+              <span class="count" id="countB">0</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="results-body">
+          <div
+            id="viewA"
+            class="results-list active"
+            role="tabpanel"
+            aria-labelledby="tab-viewA"
+            tabindex="0"
+          ></div>
+          <div
+            id="viewB"
+            class="results-list"
+            role="tabpanel"
+            aria-labelledby="tab-viewB"
+            tabindex="0"
+          ></div>
+        </div>
+
+        <footer class="footer">
+          <span data-i18n="footer.privacy">
+            ✳️ All processing happens locally in your browser; no data is sent to a server.
+          </span>
+          <span class="footer-code" data-i18n="footer.model">
+            Similarity based on a simplified TF-IDF + cosine model
+          </span>
+        </footer>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    // ---------------------------------------------------
+    // Internationalization (i18n) configuration
+    // ---------------------------------------------------
+
+    const TRANSLATIONS = {
+      en: {
+        "app.title": "List match analyzer",
+        "app.subtitle":
+          "Automatically matches the items of two lists using a semantic similarity score.",
+        "app.badge": "Local · 100% in your browser",
+
+        "lang.selectorLabel": "Interface language",
+        "lang.selectorAriaLabel": "Interface language",
+        "lang.en": "English",
+        "lang.fr": "French",
+
+        "list1.title": "List 1",
+        "list1.source": "(source A)",
+        "list1.chip": "Input",
+        "list2.title": "List 2",
+        "list2.source": "(source B)",
+        "list2.chip": "Reference",
+        "list.hint": "1 item per line",
+
+        "list1.placeholder":
+          "Example:\nJava backend developer\nDigital project manager\nSenior data analyst\nCybersecurity consultant\n\nEach line is treated as a separate item.",
+        "list2.placeholder":
+          "Example:\nJava software engineer\nWeb project lead\nData analyst\nInformation security consultant",
+
+        "analyze.title": "Semantic & statistical analysis",
+        "analyze.methods": "TF-IDF · Cosine · Normalization",
+        "analyze.button": "Run matching analysis",
+        "analyze.buttonAgain": "Run the analysis again",
+        "analyze.buttonLoading": "Analysis in progress…",
+        "analyze.howTitle": "How does it work?",
+        "analyze.howStep1":
+          "Text cleaning, stopword removal, TF-IDF weighting",
+        "analyze.howStep2":
+          "Cosine similarity between every item of both lists",
+
+        "stats.counts":
+          "{countA} item(s) in list 1 · {countB} item(s) in list 2",
+        "stats.vocab": "Vocabulary: {vocab} distinct terms",
+        "stats.vocabEmpty": "Vocabulary: — distinct terms",
+        "stats.threshold": "Match threshold: {threshold}",
+
+        "results.title": "Detected results & matches",
+        "results.summaryInitial":
+          "Matches will appear here after the analysis.",
+        "results.summaryNeedBoth":
+          "Add at least one item in each list, then run the analysis.",
+        "results.summaryEmpty":
+          "Please provide at least one item in both lists.",
+        "results.summaryMatches":
+          "Detected matches: {matchedA}/{totalA} from list 1, {matchedB}/{totalB} from list 2.",
+
+        "results.viewA": "View by list 1",
+        "results.viewB": "View by list 2",
+
+        "results.emptyA":
+          "Enter a few lines in list 1 to get started.",
+        "results.emptyB":
+          "Enter a few lines in list 2 to get started.",
+        "results.noMatches": "No matches have been detected.",
+
+        "row.list1Label": "L1 #{index}",
+        "row.list2Label": "L2 #{index}",
+        "row.score": "score:",
+        "row.noStrongMatch": "no strong match",
+        "row.noContentPlaceholder": "—",
+
+        "footer.privacy":
+          "✳️ All processing happens locally in your browser; no data is sent to a server.",
+        "footer.model":
+          "Similarity based on a simplified TF-IDF + cosine model",
+
+        "export.list1": "Export list 1 (YAML)",
+        "export.list2": "Export list 2 (YAML)",
+        "export.noData":
+          "Please run the analysis first to generate matches.",
+        "export.buttonIcon": "⇩",
+
+        "theme.light": "Light mode",
+        "theme.dark": "Dark mode",
+        "theme.ariaLabel": "Toggle light/dark theme",
+
+        "yaml.list1Root": "list1",
+        "yaml.list2Root": "list2",
+
+        "empty.list1": "list1: []",
+        "empty.list2": "list2: []"
+      },
+      fr: {
+        "app.title": "Analyseur de correspondances de listes",
+        "app.subtitle":
+          "Associe automatiquement les éléments de deux listes grâce à une mesure de similarité sémantique.",
+        "app.badge": "Local · 100% navigateur",
+
+        "lang.selectorLabel": "Langue de l’interface",
+        "lang.selectorAriaLabel": "Langue de l’interface",
+        "lang.en": "Anglais",
+        "lang.fr": "Français",
+
+        "list1.title": "Liste 1",
+        "list1.source": "(source A)",
+        "list1.chip": "Entrée",
+        "list2.title": "Liste 2",
+        "list2.source": "(source B)",
+        "list2.chip": "Référence",
+        "list.hint": "1 élément par ligne",
+
+        "list1.placeholder":
+          "Exemple :\nDéveloppeur backend Java\nChef de projet digital\nData analyst senior\nConsultant cybersécurité\n\nChaque ligne sera considérée comme un élément distinct.",
+        "list2.placeholder":
+          "Exemple :\nIngénieur logiciel Java\nResponsable de projets web\nAnalyste de données\nConsultant en sécurité informatique",
+
+        "analyze.title": "Analyse sémantique & statistique",
+        "analyze.methods": "TF-IDF · Cosinus · Normalisation",
+        "analyze.button": "Lancer l’analyse des correspondances",
+        "analyze.buttonAgain": "Relancer l’analyse",
+        "analyze.buttonLoading": "Analyse en cours…",
+        "analyze.howTitle": "Comment ça marche ?",
+        "analyze.howStep1":
+          "Nettoyage du texte, suppression des stopwords, pondération TF-IDF",
+        "analyze.howStep2":
+          "Calcul de similarité cosinus entre chaque élément des listes",
+
+        "stats.counts":
+          "{countA} élément(s) dans la liste 1 · {countB} élément(s) dans la liste 2",
+        "stats.vocab": "Vocabulaire : {vocab} termes distincts",
+        "stats.vocabEmpty": "Vocabulaire : — termes",
+        "stats.threshold": "Seuil d’appariement : {threshold}",
+
+        "results.title": "Résultats & correspondances détectées",
+        "results.summaryInitial":
+          "Les appariements apparaîtront ici après l’analyse.",
+        "results.summaryNeedBoth":
+          "Ajoutez au moins un élément dans chaque liste, puis lancez l’analyse.",
+        "results.summaryEmpty":
+          "Veuillez renseigner au moins un élément dans chacune des deux listes.",
+        "results.summaryMatches":
+          "Correspondances détectées : {matchedA}/{totalA} depuis la liste 1, {matchedB}/{totalB} depuis la liste 2.",
+
+        "results.viewA": "Vue par liste 1",
+        "results.viewB": "Vue par liste 2",
+
+        "results.emptyA":
+          "Entrez quelques lignes dans la liste 1 pour commencer.",
+        "results.emptyB":
+          "Entrez quelques lignes dans la liste 2 pour commencer.",
+        "results.noMatches":
+          "Aucun appariement n’a été détecté.",
+
+        "row.list1Label": "L1 n°{index}",
+        "row.list2Label": "L2 n°{index}",
+        "row.score": "score :",
+        "row.noStrongMatch": "aucune correspondance forte",
+        "row.noContentPlaceholder": "—",
+
+        "footer.privacy":
+          "✳️ Tout est calculé côté client, rien n’est envoyé sur un serveur.",
+        "footer.model":
+          "Similarité basée sur un modèle TF-IDF + cosinus simplifié",
+
+        "export.list1": "Exporter liste 1 (YAML)",
+        "export.list2": "Exporter liste 2 (YAML)",
+        "export.noData":
+          "Veuillez d’abord lancer une analyse pour générer des correspondances.",
+        "export.buttonIcon": "⇩",
+
+        "theme.light": "Mode clair",
+        "theme.dark": "Mode sombre",
+        "theme.ariaLabel": "Basculer le thème clair/sombre",
+
+        "yaml.list1Root": "liste1",
+        "yaml.list2Root": "liste2",
+
+        "empty.list1": "liste1: []",
+        "empty.list2": "liste2: []"
+      }
+    };
+
+    const LANGUAGE_KEY = "listMatcherLanguage";
+    let currentLanguage = "en";
+
+    // Lightweight template helper: replaces {var} tokens in strings
+    function translate(key, vars = {}) {
+      const dict = TRANSLATIONS[currentLanguage] || TRANSLATIONS.en;
+      let base = dict[key] ?? TRANSLATIONS.en[key] ?? key;
+      return Object.keys(vars).reduce((str, name) => {
+        const value = String(vars[name]);
+        return str.replace(new RegExp(`{${name}}`, "g"), value);
+      }, base);
+    }
+
+    // Applies translations to all elements with data-i18n/data-i18n-attr
+    function applyTranslationsToDom() {
+      document.querySelectorAll("[data-i18n]").forEach((el) => {
+        const key = el.getAttribute("data-i18n");
+        const attrList = el.getAttribute("data-i18n-attr");
+
+        // Attribute translation (e.g. placeholder, aria-label)
+        if (attrList) {
+          attrList.split(",").forEach((attrName) => {
+            const trimmed = attrName.trim();
+            if (!trimmed) return;
+            el.setAttribute(trimmed, translate(key));
+          });
+        } else {
+          // Text node translation
+          el.textContent = translate(key);
+        }
+      });
+
+      // Update language labels inside the select options if needed
+      const langSelect = document.getElementById("languageSelect");
+      if (langSelect) {
+        const enOption = langSelect.querySelector('option[value="en"]');
+        const frOption = langSelect.querySelector('option[value="fr"]');
+        if (enOption) enOption.textContent = translate("lang.en");
+        if (frOption) frOption.textContent = translate("lang.fr");
+      }
+    }
+
+    function detectInitialLanguage() {
+      const stored = localStorage.getItem(LANGUAGE_KEY);
+      if (stored && TRANSLATIONS[stored]) {
+        return stored;
+      }
+      if (navigator && navigator.language) {
+        const lang = navigator.language.toLowerCase();
+        if (lang.startsWith("fr")) return "fr";
+      }
+      return "en";
+    }
+
+    function setLanguage(lang) {
+      if (!TRANSLATIONS[lang]) lang = "en";
+      currentLanguage = lang;
+      localStorage.setItem(LANGUAGE_KEY, lang);
+      document.documentElement.lang = lang;
+
+      const langSelect = document.getElementById("languageSelect");
+      if (langSelect && langSelect.value !== lang) {
+        langSelect.value = lang;
+      }
+
+      applyTranslationsToDom();
+
+      // Notify other modules (theme toggle, export, etc.)
+      document.dispatchEvent(
+        new CustomEvent("app:languageChanged", {
+          detail: { language: lang }
+        })
+      );
+
+      // Refresh stats & results to reflect new language
+      refreshLiveStats();
+      if (window.__lastLists && window.__lastResult) {
+        window.renderMatches(
+          window.__lastLists.listA,
+          window.__lastLists.listB,
+          window.__lastResult
+        );
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      const initialLang = detectInitialLanguage();
+      setLanguage(initialLang);
+
+      const langSelect = document.getElementById("languageSelect");
+      if (langSelect) {
+        langSelect.addEventListener("change", (e) => {
+          setLanguage(e.target.value);
+        });
+      }
+    });
+
+    // ---------------------------------------------------
+    // Text utilities & TF-IDF / cosine implementation
+    // ---------------------------------------------------
+
+    // French and English stopword lists (can be extended or localized)
+    const STOPWORDS_FR = new Set([
+      "le","la","les","un","une","des","de","du","au","aux","en","dans","sur","sous","par",
+      "pour","avec","sans","entre","et","ou","mais","donc","or","ni","car",
+      "je","tu","il","elle","on","nous","vous","ils","elles",
+      "ce","cet","cette","ces","mon","ma","mes","ton","ta","tes","son","sa","ses",
+      "notre","nos","votre","vos","leur","leurs",
+      "qui","que","quoi","dont","où",
+      "ne","pas","plus","moins","très","trop","bien","mal",
+      "deux","trois","quatre","cinq","six","sept","huit","neuf","dix",
+      "est","sont","être","été","avoir","fait","faites","faites",
+      "aujourd","hui"
+    ]);
+
+    const STOPWORDS_EN = new Set([
+      "the","a","an","of","in","on","at","for","to","from","by","and","or","but","so",
+      "i","you","he","she","we","they","it",
+      "this","that","these","those","my","your","his","her","its","our","their",
+      "is","are","was","were","be","been","being",
+      "with","without","into","over","under","about","as","than","then",
+      "very","too","just","more","less"
+    ]);
+
+    function normalizeText(text) {
+      return text
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9'\s-]/g, " ");
+    }
+
+    function simpleStem(token) {
+      // Extremely simple FR/EN stemming (approximation only)
+      let t = token;
+      // Frequent French suffixes
+      t = t.replace(/(ements?|ations?|tions?|rices?|teurs?|euses?|euse|ment|tion|sion|ance|ence|ites?|euses?|iques?)$/i, "");
+      // Frequent English suffixes
+      t = t.replace(/(ing|ingly|ed|er|ers)$/i, "");
+      // Basic plural handling
+      t = t.replace(/(s)$/i, "");
+      return t || token;
+    }
+
+    function tokenize(text) {
+      const normalized = normalizeText(text);
+      const rawTokens = normalized.split(/\s+/).filter(Boolean);
+      const tokens = [];
+      for (const tok of rawTokens) {
+        if (STOPWORDS_FR.has(tok) || STOPWORDS_EN.has(tok)) continue;
+        const stemmed = simpleStem(tok);
+        if (stemmed.length < 2) continue;
+        tokens.push(stemmed);
+      }
+      return tokens;
+    }
+
+    function computeTfidfVectors(documentsTokens) {
+      const vocabIndex = new Map();
+      let index = 0;
+
+      // Build vocabulary
+      for (const tokens of documentsTokens) {
+        for (const t of new Set(tokens)) {
+          if (!vocabIndex.has(t)) {
+            vocabIndex.set(t, index++);
+          }
+        }
+      }
+
+      const N = documentsTokens.length;
+      const V = vocabIndex.size;
+
+      if (N === 0 || V === 0) {
+        return { vectors: [], vocabIndex, vocabSize: V };
+      }
+
+      const df = new Array(V).fill(0);
+
+      // Document frequency
+      for (const tokens of documentsTokens) {
+        const seen = new Set();
+        for (const t of tokens) {
+          const idx = vocabIndex.get(t);
+          if (idx == null) continue;
+          if (!seen.has(idx)) {
+            df[idx]++;
+            seen.add(idx);
+          }
+        }
+      }
+
+      const idf = df.map((d) => Math.log(1 + N / (1 + d)));
+
+      // TF-IDF vectors (L2-normalized)
+      const vectors = documentsTokens.map((tokens) => {
+        const vec = new Float32Array(V);
+        if (tokens.length === 0) return vec;
+        const counts = new Map();
+        for (const t of tokens) {
+          const idx = vocabIndex.get(t);
+          if (idx == null) continue;
+          counts.set(idx, (counts.get(idx) || 0) + 1);
+        }
+        const len = tokens.length;
+        for (const [idx, c] of counts) {
+          const tf = c / len;
+          vec[idx] = tf * idf[idx];
+        }
+        let norm = 0;
+        for (let i = 0; i < V; i++) norm += vec[i] * vec[i];
+        norm = Math.sqrt(norm) || 1;
+        for (let i = 0; i < V; i++) vec[i] /= norm;
+        return vec;
+      });
+
+      return { vectors, vocabIndex, vocabSize: V };
+    }
+
+    function cosineSimilarity(vecA, vecB) {
+      if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+      let dot = 0;
+      for (let i = 0; i < vecA.length; i++) {
+        dot += vecA[i] * vecB[i];
+      }
+      return dot;
+    }
+
+    function computeMatches(listA, listB, threshold = 0.12) {
+      const docs = [...listA, ...listB];
+      const tokensList = docs.map(tokenize);
+      const { vectors, vocabSize } = computeTfidfVectors(tokensList);
+
+      // Update statistics in the UI
+      updateStats(listA.length, listB.length, vocabSize, threshold);
+
+      const nA = listA.length;
+      const nB = listB.length;
+
+      const matchesFromA = [];
+      const matchesFromB = [];
+
+      // Best match for each item in list A -> list B
+      for (let i = 0; i < nA; i++) {
+        const vecA = vectors[i];
+        let bestIdx = -1;
+        let bestScore = 0;
+        for (let j = 0; j < nB; j++) {
+          const vecB = vectors[nA + j];
+          const score = cosineSimilarity(vecA, vecB);
+          if (score > bestScore) {
+            bestScore = score;
+            bestIdx = j;
+          }
+        }
+        if (bestIdx !== -1 && bestScore >= threshold) {
+          matchesFromA.push({ fromIndex: i, toIndex: bestIdx, score: bestScore });
+        } else {
+          matchesFromA.push({ fromIndex: i, toIndex: null, score: bestScore });
+        }
+      }
+
+      // Best match for each item in list B -> list A
+      for (let j = 0; j < nB; j++) {
+        const vecB = vectors[nA + j];
+        let bestIdx = -1;
+        let bestScore = 0;
+        for (let i = 0; i < nA; i++) {
+          const vecA = vectors[i];
+          const score = cosineSimilarity(vecA, vecB);
+          if (score > bestScore) {
+            bestScore = score;
+            bestIdx = i;
+          }
+        }
+        if (bestIdx !== -1 && bestScore >= threshold) {
+          matchesFromB.push({ fromIndex: j, toIndex: bestIdx, score: bestScore });
+        } else {
+          matchesFromB.push({ fromIndex: j, toIndex: null, score: bestScore });
+        }
+      }
+
+      return { matchesFromA, matchesFromB, vocabSize };
+    }
+
+    // ---------------------------------------------------
+    // UI state, accessibility & rendering logic
+    // ---------------------------------------------------
+
+    const listAEl = document.getElementById("listA");
+    const listBEl = document.getElementById("listB");
+    const analyzeBtn = document.getElementById("analyzeBtn");
+    const viewAEl = document.getElementById("viewA");
+    const viewBEl = document.getElementById("viewB");
+    const resultsSummaryEl = document.getElementById("resultsSummary");
+    const countAEl = document.getElementById("countA");
+    const countBEl = document.getElementById("countB");
+    const statsCountsEl = document.getElementById("stats-counts");
+    const statsVocabEl = document.getElementById("stats-vocab");
+    const statsThresholdEl = document.getElementById("stats-threshold");
+
+    // Store last lists and result for re-rendering on language change
+    window.__lastLists = {
+      listA: [],
+      listB: []
+    };
+    window.__lastResult = {
+      matchesFromA: [],
+      matchesFromB: [],
+      vocabSize: 0
+    };
+
+    function updateStats(nA, nB, vocabSize, threshold) {
+      statsCountsEl.textContent = translate("stats.counts", {
+        countA: nA,
+        countB: nB
+      });
+
+      if (vocabSize > 0) {
+        statsVocabEl.textContent = translate("stats.vocab", {
+          vocab: vocabSize
+        });
+      } else {
+        statsVocabEl.textContent = translate("stats.vocabEmpty");
+      }
+
+      statsThresholdEl.textContent = translate("stats.threshold", {
+        threshold:
+          currentLanguage === "fr"
+            ? threshold.toLocaleString("fr-FR", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+              })
+            : threshold.toLocaleString("en-US", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+              })
+      });
+    }
+
+    function parseList(text) {
+      return text
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+    }
+
+    function formatScore(score) {
+      if (!Number.isFinite(score)) return "0.00";
+      const locale = currentLanguage === "fr" ? "fr-FR" : "en-US";
+      return score.toLocaleString(locale, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    // Public render function (also used by export module)
+    function renderMatchesInternal(listA, listB, result) {
+      const { matchesFromA, matchesFromB } = result;
+
+      countAEl.textContent = listA.length;
+      countBEl.textContent = listB.length;
+
+      if (listA.length === 0 || listB.length === 0) {
+        resultsSummaryEl.textContent = translate("results.summaryNeedBoth");
+      } else {
+        const matchedCountA = matchesFromA.filter((m) => m.toIndex !== null).length;
+        const matchedCountB = matchesFromB.filter((m) => m.toIndex !== null).length;
+        resultsSummaryEl.textContent = translate("results.summaryMatches", {
+          matchedA: matchedCountA,
+          totalA: listA.length,
+          matchedB: matchedCountB,
+          totalB: listB.length
+        });
+      }
+
+      // View A -> B
+      if (listA.length === 0) {
+        viewAEl.innerHTML = `<div class="empty-state">${translate(
+          "results.emptyA"
+        )}</div>`;
+      } else {
+        const rows = matchesFromA
+          .map((m) => {
+            const leftText = escapeHtml(listA[m.fromIndex] || "");
+            const rightText =
+              m.toIndex !== null ? escapeHtml(listB[m.toIndex] || "") : "";
+            const hasMatch =
+              m.toIndex !== null && rightText.trim().length > 0;
+
+            const labelLeft = translate("row.list1Label", {
+              index: m.fromIndex + 1
+            });
+            const labelRight = hasMatch
+              ? translate("row.list2Label", { index: m.toIndex + 1 })
+              : null;
+            const noStrongMatch = translate("row.noStrongMatch");
+            const scoreLabel = translate("row.score");
+            const placeholder = translate("row.noContentPlaceholder");
+
+            return `
+          <div class="match-row">
+            <div class="item-card">
+              <div class="item-label">
+                <span><strong>${labelLeft}</strong></span>
+                <span class="score-pill">
+                  ${scoreLabel} <strong>${formatScore(m.score)}</strong>
+                </span>
+              </div>
+              <div class="item-text">${leftText}</div>
+            </div>
+            <div class="arrow-cell" aria-hidden="true">
+              <div class="arrow-pill">➝</div>
+            </div>
+            <div class="item-card">
+              <div class="item-label">
+                ${
+                  hasMatch
+                    ? `<span><strong>${labelRight}</strong></span>`
+                    : `<span class="no-match">
+                         <span class="no-match-dot"></span>${noStrongMatch}
+                       </span>`
+                }
+              </div>
+              <div class="item-text">
+                ${
+                  hasMatch
+                    ? rightText
+                    : `<span style="opacity:0.8;">${placeholder}</span>`
+                }
+              </div>
+            </div>
+          </div>
+        `;
+          })
+          .join("");
+
+        viewAEl.innerHTML =
+          rows ||
+          `<div class="empty-state">${translate("results.noMatches")}</div>`;
+      }
+
+      // View B -> A
+      if (listB.length === 0) {
+        viewBEl.innerHTML = `<div class="empty-state">${translate(
+          "results.emptyB"
+        )}</div>`;
+      } else {
+        const rowsB = matchesFromB
+          .map((m) => {
+            const leftText = escapeHtml(listB[m.fromIndex] || "");
+            const rightText =
+              m.toIndex !== null ? escapeHtml(listA[m.toIndex] || "") : "";
+            const hasMatch =
+              m.toIndex !== null && rightText.trim().length > 0;
+
+            const labelLeft = translate("row.list2Label", {
+              index: m.fromIndex + 1
+            });
+            const labelRight = hasMatch
+              ? translate("row.list1Label", { index: m.toIndex + 1 })
+              : null;
+            const noStrongMatch = translate("row.noStrongMatch");
+            const scoreLabel = translate("row.score");
+            const placeholder = translate("row.noContentPlaceholder");
+
+            return `
+          <div class="match-row">
+            <div class="item-card">
+              <div class="item-label">
+                <span><strong>${labelLeft}</strong></span>
+                <span class="score-pill">
+                  ${scoreLabel} <strong>${formatScore(m.score)}</strong>
+                </span>
+              </div>
+              <div class="item-text">${leftText}</div>
+            </div>
+            <div class="arrow-cell" aria-hidden="true">
+              <div class="arrow-pill">➝</div>
+            </div>
+            <div class="item-card">
+              <div class="item-label">
+                ${
+                  hasMatch
+                    ? `<span><strong>${labelRight}</strong></span>`
+                    : `<span class="no-match">
+                         <span class="no-match-dot"></span>${noStrongMatch}
+                       </span>`
+                }
+              </div>
+              <div class="item-text">
+                ${
+                  hasMatch
+                    ? rightText
+                    : `<span style="opacity:0.8;">${placeholder}</span>`
+                }
+              </div>
+            </div>
+          </div>
+        `;
+          })
+          .join("");
+
+        viewBEl.innerHTML =
+          rowsB ||
+          `<div class="empty-state">${translate("results.noMatches")}</div>`;
+      }
+    }
+
+    // Expose in global scope for the export module
+    window.renderMatches = function (listA, listB, result) {
+      renderMatchesInternal(listA, listB, result);
+    };
+
+    // Initial stats
+    updateStats(0, 0, 0, 0.12);
+
+    // Live stats refresh when typing
+    function refreshLiveStats() {
+      const listA = parseList(listAEl.value);
+      const listB = parseList(listBEl.value);
+      updateStats(listA.length, listB.length, 0, 0.12);
+    }
+
+    listAEl.addEventListener("input", refreshLiveStats);
+    listBEl.addEventListener("input", refreshLiveStats);
+
+    // Analysis button events
+    analyzeBtn.addEventListener("click", () => {
+      const listA = parseList(listAEl.value);
+      const listB = parseList(listBEl.value);
+
+      window.__lastLists = { listA: listA.slice(), listB: listB.slice() };
+
+      if (listA.length === 0 || listB.length === 0) {
+        updateStats(listA.length, listB.length, 0, 0.12);
+        resultsSummaryEl.textContent = translate("results.summaryEmpty");
+        const emptyResult = {
+          matchesFromA: [],
+          matchesFromB: [],
+          vocabSize: 0
+        };
+        window.__lastResult = emptyResult;
+        window.renderMatches(listA, listB, emptyResult);
+        return;
+      }
+
+      analyzeBtn.disabled = true;
+      analyzeBtn.innerHTML = `<span class="icon" aria-hidden="true">⏳</span><span>${translate(
+        "analyze.buttonLoading"
+      )}</span>`;
+
+      const THRESHOLD = 0.12;
+      const result = computeMatches(listA, listB, THRESHOLD);
+      window.__lastResult = result;
+
+      window.renderMatches(listA, listB, result);
+
+      analyzeBtn.disabled = false;
+      analyzeBtn.innerHTML = `<span class="icon" aria-hidden="true">➜</span><span>${translate(
+        "analyze.buttonAgain"
+      )}</span>`;
+    });
+
+    // Accessible tab behavior
+    document.querySelectorAll(".tab-button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const tab = btn.getAttribute("data-tab");
+
+        document.querySelectorAll(".tab-button").forEach((b) => {
+          const isActive = b === btn;
+          b.classList.toggle("active", isActive);
+          b.setAttribute("aria-selected", isActive ? "true" : "false");
+          b.tabIndex = isActive ? 0 : -1;
+        });
+
+        document.querySelectorAll(".results-list").forEach((list) => {
+          list.classList.toggle("active", list.id === tab);
+        });
+      });
+
+      // Optional: allow arrow key navigation between tabs
+      btn.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        const tabs = Array.from(
+          document.querySelectorAll(".tab-button")
+        );
+        const index = tabs.indexOf(btn);
+        if (index === -1) return;
+        const direction = event.key === "ArrowRight" ? 1 : -1;
+        let nextIndex = index + direction;
+        if (nextIndex < 0) nextIndex = tabs.length - 1;
+        if (nextIndex >= tabs.length) nextIndex = 0;
+        tabs[nextIndex].click();
+        tabs[nextIndex].focus();
+      });
+    });
+  </script>
+
+  <script>
+    (function () {
+      // Ensure renderMatches is available before extending it
+      if (typeof window.renderMatches !== "function") return;
+
+      const originalRenderMatches = window.renderMatches;
+
+      // Store last result for YAML export
+      window.__matchExportData = null;
+
+      window.renderMatches = function (listA, listB, result) {
+        window.__matchExportData = {
+          listA: Array.isArray(listA) ? listA.slice() : [],
+          listB: Array.isArray(listB) ? listB.slice() : [],
+          matchesFromA:
+            result && Array.isArray(result.matchesFromA)
+              ? result.matchesFromA.map((m) => ({ ...m }))
+              : [],
+          matchesFromB:
+            result && Array.isArray(result.matchesFromB)
+              ? result.matchesFromB.map((m) => ({ ...m }))
+              : []
+        };
+        return originalRenderMatches(listA, listB, result);
+      };
+
+      // YAML helpers
+      function toYamlScalar(str) {
+        const oneLine = String(str || "").replace(/\r?\n/g, " ");
+        const escaped = oneLine.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        return `"${escaped}"`;
+      }
+
+      function downloadText(filename, text) {
+        const blob = new Blob([text], { type: "text/yaml;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 0);
+      }
+
+      // Build YAML for current view ("A" for list1, "B" for list2)
+      function buildYaml(view, data) {
+        const { listA, listB, matchesFromA, matchesFromB } = data || {};
+
+        if (view === "A") {
+          if (!Array.isArray(listA) || !Array.isArray(matchesFromA)) {
+            return translate("empty.list1") + "\n";
+          }
+
+          const rootKey = translate("yaml.list1Root");
+          const lines = [];
+          lines.push(rootKey + ":");
+
+          if (listA.length === 0) {
+            return translate("empty.list1") + "\n";
+          }
+
+          matchesFromA.forEach(function (m) {
+            const parentText = listA[m.fromIndex] || "";
+            lines.push("  - parent: " + toYamlScalar(parentText));
+
+            if (m.toIndex !== null && listB && listB[m.toIndex]) {
+              const childText = listB[m.toIndex];
+              lines.push("    children:");
+              lines.push("      - " + toYamlScalar(childText));
+            } else {
+              lines.push("    children: []");
+            }
+          });
+
+          return lines.join("\n") + "\n";
+        } else {
+          if (!Array.isArray(listB) || !Array.isArray(matchesFromB)) {
+            return translate("empty.list2") + "\n";
+          }
+
+          const rootKey = translate("yaml.list2Root");
+          const lines = [];
+          lines.push(rootKey + ":");
+
+          if (listB.length === 0) {
+            return translate("empty.list2") + "\n";
+          }
+
+          matchesFromB.forEach(function (m) {
+            const parentText = listB[m.fromIndex] || "";
+            lines.push("  - parent: " + toYamlScalar(parentText));
+
+            if (m.toIndex !== null && listA && listA[m.toIndex]) {
+              const childText = listA[m.toIndex];
+              lines.push("    children:");
+              lines.push("      - " + toYamlScalar(childText));
+            } else {
+              lines.push("    children: []");
+            }
+          });
+
+          return lines.join("\n") + "\n";
+        }
+      }
+
+      const resultsHeader = document.querySelector(".results-header");
+      if (!resultsHeader) return;
+
+      let currentView = "A"; // "A" = view by list1, "B" = view by list2
+
+      const exportBtn = document.createElement("button");
+      exportBtn.type = "button";
+      exportBtn.className = "chip";
+      exportBtn.style.cursor = "pointer";
+      exportBtn.setAttribute("aria-label", "Export matches as YAML");
+
+      function updateExportButtonLabel() {
+        const icon = translate("export.buttonIcon");
+        if (currentView === "A") {
+          exportBtn.innerHTML =
+            `<span>${icon}</span> ${translate("export.list1")}`;
+        } else {
+          exportBtn.innerHTML =
+            `<span>${icon}</span> ${translate("export.list2")}`;
+        }
+      }
+
+      function exportYamlForCurrentView() {
+        const data = window.__matchExportData;
+        if (
+          !data ||
+          !Array.isArray(data.listA) ||
+          !Array.isArray(data.listB)
+        ) {
+          alert(translate("export.noData"));
+          return;
+        }
+
+        const yaml = buildYaml(currentView, data);
+        const filename =
+          currentView === "A"
+            ? "matches_list1.yaml"
+            : "matches_list2.yaml";
+
+        downloadText(filename, yaml);
+      }
+
+      exportBtn.addEventListener("click", exportYamlForCurrentView);
+
+      // Initial active tab detection
+      const activeTab = document.querySelector(".tab-button.active");
+      if (activeTab && activeTab.getAttribute("data-tab") === "viewB") {
+        currentView = "B";
+      }
+      updateExportButtonLabel();
+
+      resultsHeader.appendChild(exportBtn);
+
+      // Update view when tabs are clicked
+      document.querySelectorAll(".tab-button").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          const tab = btn.getAttribute("data-tab");
+          currentView = tab === "viewB" ? "B" : "A";
+          updateExportButtonLabel();
+        });
+      });
+
+      // Update export button label when language changes
+      document.addEventListener("app:languageChanged", () => {
+        updateExportButtonLabel();
+      });
+    })();
+  </script>
+
+  <script>
+    (function () {
+      // Theme toggle using the two <style> blocks (dark & light)
+      const styleEls = Array.from(document.querySelectorAll("head style"));
+
+      // Attempt to identify dark vs light styles using a dark color token
+      let darkStyle =
+        styleEls.find((s) => s.textContent.includes("#0f172a")) || styleEls[0];
+      let lightStyle = styleEls.find((s) => s !== darkStyle) || styleEls[1];
+
+      const THEME_KEY = "listMatcherTheme";
+      let currentTheme = localStorage.getItem(THEME_KEY);
+      if (currentTheme !== "light" && currentTheme !== "dark") {
+        currentTheme = "dark";
+      }
+
+      function updateToggleLabel(btn, theme) {
+        if (!btn) return;
+        const labelKey = "theme.ariaLabel";
+        const ariaLabel = translate(labelKey);
+
+        if (theme === "dark") {
+          btn.innerHTML = `☀️&nbsp;${translate("theme.light")}`;
+          btn.setAttribute("aria-pressed", "false");
+        } else {
+          btn.innerHTML = `🌙&nbsp;${translate("theme.dark")}`;
+          btn.setAttribute("aria-pressed", "true");
+        }
+        btn.setAttribute("aria-label", ariaLabel);
+      }
+
+      function applyTheme(theme, toggleBtn) {
+        currentTheme = theme;
+        localStorage.setItem(THEME_KEY, theme);
+
+        if (darkStyle && lightStyle) {
+          if (theme === "light") {
+            darkStyle.setAttribute("media", "not all");
+            lightStyle.removeAttribute("media");
+          } else {
+            lightStyle.setAttribute("media", "not all");
+            darkStyle.removeAttribute("media");
+          }
+        }
+
+        document.documentElement.setAttribute("data-theme", theme);
+        updateToggleLabel(toggleBtn, theme);
+      }
+
+      const header = document.querySelector(".app-header .header-actions");
+      if (!header) return;
+
+      const toggleBtn = document.createElement("button");
+      toggleBtn.type = "button";
+      toggleBtn.className = "chip";
+      toggleBtn.style.cursor = "pointer";
+      toggleBtn.setAttribute("role", "button");
+      toggleBtn.setAttribute("aria-live", "polite");
+
+      header.appendChild(toggleBtn);
+
+      // Apply initial theme
+      applyTheme(currentTheme, toggleBtn);
+
+      toggleBtn.addEventListener("click", function () {
+        const nextTheme = currentTheme === "dark" ? "light" : "dark";
+        applyTheme(nextTheme, toggleBtn);
+      });
+
+      // Update theme toggle labels when language changes
+      document.addEventListener("app:languageChanged", () => {
+        updateToggleLabel(toggleBtn, currentTheme);
+      });
+    })();
+  </script>
+</body>
+</html>
