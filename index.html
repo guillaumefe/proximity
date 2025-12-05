@@ -1896,20 +1896,43 @@ function tokenize(text) {
     // Example:
     //   PM = Digital project manager
     //   Dev backend: Java backend developer
-    function parseGlossary(text) {
-      return (text || "")
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0 && !line.startsWith("#"))
-        .map((line) => {
-          const parts = line.split(/[:=]/);
-          if (parts.length < 2) return null;
-          const from = parts[0].trim();     // variante / alias
-          const to   = parts.slice(1).join(":").trim(); // terme canonique
-          if (!from || !to) return null;
-          return { from, to };
-        })
-        .filter(Boolean);
+    // Construit un index de pivots par terme important (stem)
+    // term (stem) -> { expansions: Set<string> }
+    function buildGlossaryTermPivotIndex(glossaryPairs) {
+      const pivotIndex = new Map();
+    
+      if (!Array.isArray(glossaryPairs)) return { pivotIndex };
+    
+      for (const pair of glossaryPairs) {
+        if (!pair || !pair.from || !pair.to) continue;
+    
+        const keyText = pair.from.trim();
+        const valText = pair.to.trim();
+        if (!keyText || !valText) continue;
+    
+        // Tous les mots de la clé + de la valeur
+        const importantTerms = tokenize(keyText + " " + valText);
+        const uniqueTerms = new Set(importantTerms); // éviter les doublons
+    
+        // Ce sont NOS "termes importants"
+        for (const term of uniqueTerms) {
+          if (!term || term.length < 2) continue; // sécurité
+    
+          let entry = pivotIndex.get(term);
+          if (!entry) {
+            entry = { expansions: new Set() };
+            pivotIndex.set(term, entry);
+          }
+    
+          // On ajoute les expressions "brutes" que l'utilisateur a données :
+          // - la clé
+          // - la valeur
+          entry.expansions.add(keyText);
+          entry.expansions.add(valText);
+        }
+      }
+    
+      return { pivotIndex };
     }
     
 // Construit des "pivots" : un groupe par terme canonique
@@ -1950,55 +1973,46 @@ function buildGlossaryPivots(pairs) {
     //   -> "PM digital Digital project manager"
 // Enrichit une phrase en ajoutant le pivot canonique + toutes les variantes du groupe
 // dès qu'on détecte au moins un des termes (canonique ou variante).
-function applyGlossaryToSentence(sentence, glossary) {
+// Enrichit une phrase en utilisant les pivots par terme important
+// sentence: texte original
+// glossaryPivot: objet retourné par buildGlossaryTermPivotIndex
+function applyGlossaryToSentence(sentence, glossaryPivot) {
   const base = sentence || "";
-  if (!glossary || !glossary.canonicalGroups || glossary.canonicalGroups.size === 0) {
+  if (
+    !glossaryPivot ||
+    !glossaryPivot.pivotIndex ||
+    glossaryPivot.pivotIndex.size === 0
+  ) {
     return base;
   }
 
   let result = base;
-  // On travaille sur une seule version lowercase pour les détections
-  let lower = result.toLowerCase();
+  let lowerResult = result.toLowerCase();
 
-  for (const [canonicalLower, group] of glossary.canonicalGroups.entries()) {
-    const canonical = group.canonical; // string
-    const canonicalLowerStr = canonicalLower;
+  // On prend les stems de la phrase (mêmes "termes importants" que pour le glossaire)
+  const sentenceTerms = new Set(tokenize(base));
 
-    let hit = false;
+  // Pour éviter d’ajouter un milliard de choses
+  const MAX_EXPANSIONS_PER_SENTENCE = 20;
+  let expansionsCount = 0;
 
-    // 1) Si le texte contient déjà la forme canonique
-    if (lower.includes(canonicalLowerStr)) {
-      hit = true;
-    } else {
-      // 2) Sinon, vérifier chaque variante
-      for (const variant of group.variants) {
-        const vLower = variant.toLowerCase();
-        if (lower.includes(vLower)) {
-          hit = true;
-          break;
-        }
-      }
+  for (const term of sentenceTerms) {
+    const entry = glossaryPivot.pivotIndex.get(term);
+    if (!entry) continue;
+
+    for (const exp of entry.expansions) {
+      if (expansionsCount >= MAX_EXPANSIONS_PER_SENTENCE) break;
+
+      const expLower = exp.toLowerCase();
+      // Si la phrase contient déjà cette expansion, on ne la répète pas
+      if (lowerResult.includes(expLower)) continue;
+
+      result += " " + exp;
+      lowerResult += " " + expLower;
+      expansionsCount++;
     }
 
-    if (!hit) continue;
-
-    // On a détecté au moins un terme du groupe → on injecte le pivot + toutes les variantes,
-    // mais seulement si elles ne sont pas déjà présentes (pour éviter les répétitions infinies).
-
-    // Ajout du canonique
-    if (!lower.includes(canonicalLowerStr)) {
-      result += " " + canonical;
-      lower += " " + canonicalLowerStr;
-    }
-
-    // Ajout de toutes les variantes de ce pivot
-    for (const variant of group.variants) {
-      const vLower = variant.toLowerCase();
-      if (!lower.includes(vLower)) {
-        result += " " + variant;
-        lower += " " + vLower;
-      }
-    }
+    if (expansionsCount >= MAX_EXPANSIONS_PER_SENTENCE) break;
   }
 
   return result;
@@ -2532,17 +2546,18 @@ function parseList(text) {
         const rawListA = parseList(listAEl.value);
         const rawListB = parseList(listBEl.value);
         
-        const glossaryText   = glossaryEl ? glossaryEl.value : "";
-        const glossaryPairs  = parseGlossary(glossaryText);
-        const glossaryPivots = buildGlossaryPivots(glossaryPairs);
+        const glossaryText = glossaryEl ? glossaryEl.value : "";
+        const glossaryPairs = parseGlossary(glossaryText);
+        const glossaryPivot = buildGlossaryTermPivotIndex(glossaryPairs);
         
-        // Listes enrichies pour le calcul de similarité
+        // Enriched lists for similarity computation
         const listAForSimilarity = rawListA.map((line) =>
-          applyGlossaryToSentence(line, glossaryPivots)
+          applyGlossaryToSentence(line, glossaryPivot)
         );
         const listBForSimilarity = rawListB.map((line) =>
-          applyGlossaryToSentence(line, glossaryPivots)
+          applyGlossaryToSentence(line, glossaryPivot)
         );
+
 
       window.__lastLists = {
         listA: rawListA.slice(),
