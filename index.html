@@ -2013,8 +2013,9 @@ function estimateMaxUseComparisons() {
 // ------------------------------------------------------------
 // computeMatches() — VERSION AUTO + OPTIMISÉE
 // ------------------------------------------------------------
-async function computeMatches(listA, listB, threshold) {
-  const canUseUSE = typeof use !== "undefined" && typeof tf !== "undefined";
+async function computeMatches(listA, listB, threshold, onProgress) {
+  const progress =
+    typeof onProgress === "function" ? onProgress : () => {};
 
   const nA = listA.length;
   const nB = listB.length;
@@ -2029,33 +2030,31 @@ async function computeMatches(listA, listB, threshold) {
     };
   }
 
-  // AUTO : budget maximum pour USE
-  const MAX_USE_COMPARISONS = estimateMaxUseComparisons();
+  // ------------------------------------------------------------
+  // 0) Optionnel : USE seulement pour très petits inputs
+  // ------------------------------------------------------------
+  const canUseUSE = typeof use !== "undefined" && typeof tf !== "undefined";
+  const SMALL_USE_LIMIT = 2000; // nb max de comparaisons pour essayer USE
 
-  // ------------------------------------------------------------
-  // 1) USE (si disponible + taille raisonnable)
-  // ------------------------------------------------------------
-  if (canUseUSE && nA * nB <= MAX_USE_COMPARISONS) {
+  if (canUseUSE && nA * nB <= SMALL_USE_LIMIT) {
     try {
-      const model = await getUseModel();
+      progress({ phase: "USE", done: 0, total: 1 });
 
+      const model = await getUseModel();
       const allSentences = [...listA, ...listB];
       const embeddings = await model.embed(allSentences);
-
       const dim = embeddings.shape[1];
 
       const result = tf.tidy(() => {
         const embA = embeddings.slice([0, 0], [nA, dim]);
         const embB = embeddings.slice([nA, 0], [nB, dim]);
 
-        // Normalisation L2 ligne par ligne
         const normA = embA.norm("euclidean", 1).expandDims(1);
         const normB = embB.norm("euclidean", 1).expandDims(1);
 
         const embA_norm = embA.div(normA);
         const embB_norm = embB.div(normB);
 
-        // Matrice des similarités : [nA, nB]
         const simMatrix = embA_norm.matMul(embB_norm, false, true);
         const sims = simMatrix.arraySync();
 
@@ -2101,7 +2100,9 @@ async function computeMatches(listA, listB, threshold) {
         return { matchesFromA, matchesFromB };
       });
 
-      embeddings.dispose(); // libération mémoire TFJS
+      embeddings.dispose();
+
+      progress({ phase: "USE", done: 1, total: 1 });
 
       updateStats(nA, nB, 0, threshold);
       return {
@@ -2111,13 +2112,15 @@ async function computeMatches(listA, listB, threshold) {
       };
     } catch (err) {
       console.error("USE failed, fallback to TF-IDF:", err);
-      // → continue vers TF-IDF
+      // on tombe sur TF-IDF incrémental
     }
   }
 
   // ------------------------------------------------------------
-  // 2) Fallback TF-IDF + Fuzzy
+  // 1) Préparation TF-IDF (phase rapide mais bloquante)
   // ------------------------------------------------------------
+  progress({ phase: "prepare", done: 0, total: 3 });
+
   const listTokensA = listA.map(tokenize);
   const listTokensB = listB.map(tokenize);
   const allTokens = [...listTokensA, ...listTokensB];
@@ -2127,11 +2130,18 @@ async function computeMatches(listA, listB, threshold) {
   const vecA = vectors.slice(0, nA);
   const vecB = vectors.slice(nA);
 
+  progress({ phase: "prepare", done: 1, total: 3 });
+
+  // ------------------------------------------------------------
+  // 2) Matching incrémental A -> B
+  // ------------------------------------------------------------
   const matchesFromA = [];
   const matchesFromB = [];
 
-  const alpha = 0.7; // semantic weight
-  const beta = 0.3;  // fuzzy weight
+  const alpha = 0.7; // TF-IDF
+  const beta = 0.3;  // fuzzy
+
+  const BATCH = 20; // nb d’éléments traités avant de rendre la main
 
   // A -> B
   for (let i = 0; i < nA; i++) {
@@ -2146,14 +2156,33 @@ async function computeMatches(listA, listB, threshold) {
         bestIdx = j;
       }
     }
+
     matchesFromA.push({
       fromIndex: i,
       toIndex: bestScore >= threshold ? bestIdx : null,
       score: bestScore
     });
+
+    if (i % BATCH === BATCH - 1) {
+      progress({
+        phase: "A->B",
+        done: i + 1,
+        total: nA + nB
+      });
+      // on rend la main au navigateur pour éviter le freeze
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
   }
 
-  // B -> A
+  progress({
+    phase: "A->B",
+    done: nA,
+    total: nA + nB
+  });
+
+  // ------------------------------------------------------------
+  // 3) Matching incrémental B -> A
+  // ------------------------------------------------------------
   for (let j = 0; j < nB; j++) {
     let bestScore = 0;
     let bestIdx = null;
@@ -2166,16 +2195,33 @@ async function computeMatches(listA, listB, threshold) {
         bestIdx = i;
       }
     }
+
     matchesFromB.push({
       fromIndex: j,
       toIndex: bestScore >= threshold ? bestIdx : null,
       score: bestScore
     });
+
+    if (j % BATCH === BATCH - 1) {
+      progress({
+        phase: "B->A",
+        done: nA + j + 1,
+        total: nA + nB
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
   }
+
+  progress({
+    phase: "B->A",
+    done: nA + nB,
+    total: nA + nB
+  });
 
   updateStats(nA, nB, vocabSize, threshold);
   return { matchesFromA, matchesFromB, vocabSize };
 }
+
     // ---------------------------------------------------
     // UI state, rendering & YAML export
     // ---------------------------------------------------
@@ -2409,8 +2455,27 @@ async function computeMatches(listA, listB, threshold) {
         const result = await computeMatches(
           listAForSimilarity,
           listBForSimilarity,
-          MATCH_THRESHOLD
+          MATCH_THRESHOLD,
+          (info) => {
+            // info.phase = "prepare" | "A->B" | "B->A" | "USE"
+            // info.done / info.total -> pourcentage global
+    
+            const pct =
+              info && info.total
+                ? Math.round((info.done / info.total) * 100)
+                : 0;
+    
+            let phaseLabel = "";
+            if (info.phase === "prepare") phaseLabel = "Préparation des données";
+            else if (info.phase === "A->B") phaseLabel = "Analyse liste 1 → liste 2";
+            else if (info.phase === "B->A") phaseLabel = "Analyse liste 2 → liste 1";
+            else if (info.phase === "USE") phaseLabel = "Analyse sémantique (USE)";
+    
+            resultsSummaryEl.textContent =
+              `${phaseLabel}… (${pct}%)`;
+          }
         );
+    
         window.__lastResult = result;
         window.renderMatches(rawListA, rawListB, result);
       } catch (err) {
@@ -2429,6 +2494,8 @@ async function computeMatches(listA, listB, threshold) {
         analyzeBtn.innerHTML =
           `<span class="icon" aria-hidden="true">➜</span><span>Run the analysis again</span>`;
       }
+
+      
     });
 
     // Accessible tabs
