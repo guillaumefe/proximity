@@ -1717,7 +1717,7 @@ You can also define abbreviations or translations."
     // Text utilities & TF-IDF / cosine implementation
     // ---------------------------------------------------
 
-    const MATCH_THRESHOLD = 0.35;
+    const MATCH_THRESHOLD = 0.22;
 
     // Basic English and French stopword lists (can be extended)
     const STOPWORDS_FR = new Set([
@@ -2138,8 +2138,8 @@ async function computeMatches(listA, listB, threshold, onProgress) {
   const matchesFromA = [];
   const matchesFromB = [];
 
-  const alpha = 0.7; // TF-IDF
-  const beta = 0.3;  // fuzzy
+  const alpha = 0.6; // TF-IDF
+  const beta = 0.4;  // fuzzy
 
   const BATCH = 20; // nb d’éléments traités avant de rendre la main
 
