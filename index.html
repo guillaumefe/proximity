@@ -2032,21 +2032,65 @@ function buildGlossaryPivots(pairs) {
   return { canonicalGroups };
 }
 
+// mot (stem) -> { expansions: Set<string> }
+// - si le mot vient de la clé : expansions += value
+// - si le mot vient de la value : expansions += clé
+function buildGlossaryWordExpansionIndex(glossaryPairs) {
+  const index = new Map();
+
+  if (!Array.isArray(glossaryPairs) || glossaryPairs.length === 0) {
+    return { index };
+  }
+
+  function addExpansion(term, expansionText) {
+    if (!term || term.length < 2) return;
+    let entry = index.get(term);
+    if (!entry) {
+      entry = { expansions: new Set() };
+      index.set(term, entry);
+    }
+    entry.expansions.add(expansionText);
+  }
+
+  for (const pair of glossaryPairs) {
+    if (!pair || !pair.from || !pair.to) continue;
+
+    const keyText = pair.from.trim();
+    const valText = pair.to.trim();
+    if (!keyText || !valText) continue;
+
+    // Mots importants de la clé
+    const keyTerms = new Set(tokenize(keyText));
+    // Mots importants de la value
+    const valTerms = new Set(tokenize(valText));
+
+    // 1) mots de la clé → injecter la définition (value)
+    for (const t of keyTerms) {
+      addExpansion(t, valText);
+    }
+
+    // 2) mots de la value → injecter la clé
+    for (const t of valTerms) {
+      addExpansion(t, keyText);
+    }
+  }
+
+  return { index };
+}
+
 function parseGlossary(text) {
   return (text || "")
     .split(/\r?\n/)
     .map(line => line.trim())
     .filter(line => line.length > 0 && !line.startsWith("#"))
     .map(line => {
-      // Split on "=" or ":" (your syntax)
       const parts = line.split(/[:=]/);
       if (parts.length < 2) return null;
 
-      const from = parts[0].trim();
-      const to   = parts.slice(1).join(":").trim(); // keep ":" inside value if needed
+      const from = parts[0].trim();                // clé
+      const to   = parts.slice(1).join(":").trim(); // value (définition)
 
       if (!from || !to) return null;
-
       return { from, to };
     })
     .filter(Boolean);
@@ -2063,12 +2107,12 @@ function parseGlossary(text) {
     // Enrichit une phrase en utilisant les pivots par terme important
     // sentence: texte original
     // glossaryPivot: objet retourné par buildGlossaryTermPivotIndex
-    function applyGlossaryToSentence(sentence, glossaryPivot) {
+    function applyGlossaryToSentence(sentence, glossaryExpansionIndex) {
       const base = sentence || "";
       if (
-        !glossaryPivot ||
-        !glossaryPivot.pivotIndex ||
-        glossaryPivot.pivotIndex.size === 0
+        !glossaryExpansionIndex ||
+        !glossaryExpansionIndex.index ||
+        glossaryExpansionIndex.index.size === 0
       ) {
         return base;
       }
@@ -2076,21 +2120,21 @@ function parseGlossary(text) {
       let result = base;
       let lowerResult = result.toLowerCase();
     
-      // mêmes "termes importants" que pour le glossaire
-      const sentenceTerms = new Set(tokenize(base));
+      // mêmes "mots importants" que pour le glossaire
+      const termsInSentence = new Set(tokenize(base));
     
-      const MAX_EXPANSIONS_PER_SENTENCE = 20; // sécurité
+      const MAX_EXPANSIONS_PER_SENTENCE = 20; // garde-fou
       let expansionsCount = 0;
     
-      for (const term of sentenceTerms) {
-        const entry = glossaryPivot.pivotIndex.get(term);
+      for (const term of termsInSentence) {
+        const entry = glossaryExpansionIndex.index.get(term);
         if (!entry) continue;
     
         for (const exp of entry.expansions) {
           if (expansionsCount >= MAX_EXPANSIONS_PER_SENTENCE) break;
     
           const expLower = exp.toLowerCase();
-          if (lowerResult.includes(expLower)) continue;
+          if (lowerResult.includes(expLower)) continue; // déjà présent
     
           result += " " + exp;
           lowerResult += " " + expLower;
@@ -2102,6 +2146,7 @@ function parseGlossary(text) {
     
       return result;
     }
+
 
 
     // ---------------------------------------------------
@@ -2628,54 +2673,42 @@ function parseList(text) {
 
     // Analysis button
     analyzeBtn.addEventListener("click", async () => {
-        
-        const rawListA = parseList(listAEl.value);
-        const rawListB = parseList(listBEl.value);
-        
-        const glossaryText = glossaryEl ? glossaryEl.value : "";
-        const glossaryPairs = parseGlossary(glossaryText);
-        const glossaryPivot = buildGlossaryTermPivotIndex(glossaryPairs);
-        
-        // Enriched lists for similarity computation
-        const listAForSimilarity = rawListA.map((line) =>
-          applyGlossaryToSentence(line, glossaryPivot)
-        );
-        const listBForSimilarity = rawListB.map((line) =>
-          applyGlossaryToSentence(line, glossaryPivot)
-        );
-
-
+      const rawListA = parseList(listAEl.value);
+      const rawListB = parseList(listBEl.value);
+    
+      const glossaryText  = glossaryEl ? glossaryEl.value : "";
+      const glossaryPairs = parseGlossary(glossaryText);
+      const glossaryIndex = buildGlossaryWordExpansionIndex(glossaryPairs);
+    
+      // Listes enrichies pour la similarité
+      const listAForSimilarity = rawListA.map(line =>
+        applyGlossaryToSentence(line, glossaryIndex)
+      );
+      const listBForSimilarity = rawListB.map(line =>
+        applyGlossaryToSentence(line, glossaryIndex)
+      );
+    
       window.__lastLists = {
         listA: rawListA.slice(),
         listB: rawListB.slice()
       };
-
+    
       if (rawListA.length === 0 || rawListB.length === 0) {
-        updateStats(rawListA.length, rawListB.length, 0, MATCH_THRESHOLD);
-        resultsSummaryEl.textContent = "Please provide at least one item in both lists.";
-        const emptyResult = {
-          matchesFromA: [],
-          matchesFromB: [],
-          vocabSize: 0
-        };
-        window.__lastResult = emptyResult;
-        window.renderMatches(rawListA, rawListB, emptyResult);
+        // ... ton code existant pour le cas vide ...
         return;
       }
-
+    
       analyzeBtn.disabled = true;
       analyzeBtn.innerHTML =
         `<span class="icon" aria-hidden="true">⏳</span><span>Analysis in progress…</span>`;
-
+    
       try {
         const result = await computeMatches(
           listAForSimilarity,
           listBForSimilarity,
           MATCH_THRESHOLD,
           (info) => {
-            // info.phase = "prepare" | "A->B" | "B->A" | "USE"
-            // info.done / info.total -> pourcentage global
-    
+            // callback de progression si tu l’utilises
             const pct =
               info && info.total
                 ? Math.round((info.done / info.total) * 100)
@@ -2685,7 +2718,7 @@ function parseList(text) {
             if (info.phase === "prepare") phaseLabel = "Préparation des données";
             else if (info.phase === "A->B") phaseLabel = "Analyse liste 1 → liste 2";
             else if (info.phase === "B->A") phaseLabel = "Analyse liste 2 → liste 1";
-            else if (info.phase === "USE") phaseLabel = "Analyse sémantique (USE)";
+            else if (info.phase === "USE")  phaseLabel = "Analyse sémantique (USE)";
     
             resultsSummaryEl.textContent =
               `${phaseLabel}… (${pct}%)`;
@@ -2710,8 +2743,6 @@ function parseList(text) {
         analyzeBtn.innerHTML =
           `<span class="icon" aria-hidden="true">➜</span><span>Run the analysis again</span>`;
       }
-
-      
     });
 
     // Accessible tabs
