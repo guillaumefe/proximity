@@ -2598,11 +2598,26 @@ function parseList(text) {
         return originalRenderMatches(listA, listB, result);
       };
 
-    function toYamlScalar(str) {
-      const oneLine = String(str || "").replace(/\r?\n/g, " "); // ICI : \r?\n
-      const escaped = oneLine.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-      return `"${escaped}"`;
-    }
+function toYamlScalar(value) {
+  if (value == null) return '""';
+
+  const str = String(value);
+
+  // S'il y a des retours à la ligne → block literal YAML
+  if (/\r?\n/.test(str)) {
+    const cleaned = str.replace(/\r?\n/g, "\n"); // uniformiser Unix
+    const indented = cleaned
+      .split("\n")
+      .map((l) => "  " + l) // indentation obligatoire en YAML
+      .join("\n");
+
+    return "|\n" + indented;
+  }
+
+  // Sinon → chaîne simple avec échappements
+  const escaped = str.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `"${escaped}"`;
+}
 
       function downloadText(filename, text) {
         const blob = new Blob([text], { type: "text/yaml;charset=utf-8;" });
