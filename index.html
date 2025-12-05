@@ -2572,187 +2572,188 @@ function parseList(text) {
     });
   </script>
 
-  <script>
-    // ---------------------------------------------------
-    // YAML export integration
-    // ---------------------------------------------------
-    (function () {
-      if (typeof window.renderMatches !== "function") return;
+<script>
+  // ---------------------------------------------------
+  // YAML export integration (corrigé)
+  // ---------------------------------------------------
+  (function () {
+    if (typeof window.renderMatches !== "function") return;
 
-      const originalRenderMatches = window.renderMatches;
-      window.__matchExportData = null;
+    const originalRenderMatches = window.renderMatches;
+    window.__matchExportData = null;
 
-      window.renderMatches = function (listA, listB, result) {
-        window.__matchExportData = {
-          listA: Array.isArray(listA) ? listA.slice() : [],
-          listB: Array.isArray(listB) ? listB.slice() : [],
-          matchesFromA:
-            result && Array.isArray(result.matchesFromA)
-              ? result.matchesFromA.map((m) => ({ ...m }))
-              : [],
-          matchesFromB:
-            result && Array.isArray(result.matchesFromB)
-              ? result.matchesFromB.map((m) => ({ ...m }))
-              : []
-        };
-        return originalRenderMatches(listA, listB, result);
+    window.renderMatches = function (listA, listB, result) {
+      window.__matchExportData = {
+        listA: Array.isArray(listA) ? listA.slice() : [],
+        listB: Array.isArray(listB) ? listB.slice() : [],
+        matchesFromA:
+          result && Array.isArray(result.matchesFromA)
+            ? result.matchesFromA.map((m) => ({ ...m }))
+            : [],
+        matchesFromB:
+          result && Array.isArray(result.matchesFromB)
+            ? result.matchesFromB.map((m) => ({ ...m }))
+            : []
       };
+      return originalRenderMatches(listA, listB, result);
+    };
 
-function toYamlScalar(value) {
-  if (value == null) return '""';
+    // -------- toYamlScalar : VRAIS retours à la ligne --------
+    function toYamlScalar(value) {
+      if (value == null) return '""';
 
-  const str = String(value);
+      const str = String(value);
 
-  // S'il y a des retours à la ligne → block literal YAML
-  if (/\r?\n/.test(str)) {
-    const cleaned = str.replace(/\r?\n/g, "\n"); // uniformiser Unix
-    const indented = cleaned
-      .split("\n")
-      .map((l) => "  " + l) // indentation obligatoire en YAML
-      .join("\n");
-
-    return "|\n" + indented;
-  }
-
-  // Sinon → chaîne simple avec échappements
-  const escaped = str.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  return `"${escaped}"`;
-}
-
-      function downloadText(filename, text) {
-        const blob = new Blob([text], { type: "text/yaml;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(function () {
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }, 0);
+      // Si multi-ligne → bloc YAML "literal" (|)
+      if (/\r?\n/.test(str)) {
+        const cleaned = str.replace(/\r?\n/g, "\n");
+        const indented = cleaned
+          .split("\n")
+          .map((l) => "      " + l) // indentation correcte
+          .join("\n");
+        return "|\n" + indented;
       }
 
-      // Build YAML for current view ("A" for list1, "B" for list2)
-      function buildYaml(view, data) {
-        const { listA, listB, matchesFromA, matchesFromB } = data || {};
+      // Sinon → chaîne simple
+      const escaped = str.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      return `"${escaped}"`;
+    }
 
-        if (view === "A") {
-          if (!Array.isArray(listA) || !Array.isArray(matchesFromA)) {
-            return "list1: []\\n";
-          }
+    function downloadText(filename, text) {
+      const blob = new Blob([text], { type: "text/yaml;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 0);
+    }
 
-          const rootKey = "list1";
-          const lines = [];
-          lines.push(rootKey + ":");
+    // -------- buildYaml : utilise de VRAIS "\n" --------
+    function buildYaml(view, data) {
+      const { listA, listB, matchesFromA, matchesFromB } = data || {};
 
-          const filtered = matchesFromA.filter(
-            (m) => m.toIndex !== null && listB && listB[m.toIndex]
-          );
-
-          if (filtered.length === 0) {
-            return "list1: []\\n";
-          }
-
-          filtered.forEach(function (m) {
-            const parentText = listA[m.fromIndex] || "";
-            const childText = listB[m.toIndex] || "";
-
-            lines.push("  - parent: " + toYamlScalar(parentText));
-            lines.push("    children:");
-            lines.push("      - " + toYamlScalar(childText));
-          });
-
-          return lines.join("\\n") + "\\n";
-        } else {
-          if (!Array.isArray(listB) || !Array.isArray(matchesFromB)) {
-            return "list2: []\\n";
-          }
-
-          const rootKey = "list2";
-          const lines = [];
-          lines.push(rootKey + ":");
-
-          const filtered = matchesFromB.filter(
-            (m) => m.toIndex !== null && listA && listA[m.toIndex]
-          );
-
-          if (filtered.length === 0) {
-            return "list2: []\\n";
-          }
-
-          filtered.forEach(function (m) {
-            const parentText = listB[m.fromIndex] || "";
-            const childText = listA[m.toIndex] || "";
-
-            lines.push("  - parent: " + toYamlScalar(parentText));
-            lines.push("    children:");
-            lines.push("      - " + toYamlScalar(childText));
-          });
-
-          return lines.join("\\n") + "\\n";
-        }
-      }
-
-      const resultsHeader = document.querySelector(".results-header");
-      if (!resultsHeader) return;
-
-      let currentView = "A"; // "A" = view by list1, "B" = view by list2
-
-      const exportBtn = document.createElement("button");
-      exportBtn.type = "button";
-      exportBtn.className = "chip";
-      exportBtn.style.cursor = "pointer";
-      exportBtn.setAttribute("aria-label", "Export matches as YAML");
-
-      function updateExportButtonLabel() {
-        const icon = "⇩";
-        if (currentView === "A") {
-          exportBtn.innerHTML = `<span>${icon}</span> Export list 1 (YAML)`;
-        } else {
-          exportBtn.innerHTML = `<span>${icon}</span> Export list 2 (YAML)`;
-        }
-      }
-
-      function exportYamlForCurrentView() {
-        const data = window.__matchExportData;
-        if (
-          !data ||
-          !Array.isArray(data.listA) ||
-          !Array.isArray(data.listB)
-        ) {
-          alert("Please run the analysis first to generate matches.");
-          return;
+      if (view === "A") {
+        if (!Array.isArray(listA) || !Array.isArray(matchesFromA)) {
+          return "list1: []\n";
         }
 
-        const yaml = buildYaml(currentView, data);
-        const filename =
-          currentView === "A"
-            ? "matches_list1.yaml"
-            : "matches_list2.yaml";
+        const rootKey = "list1";
+        const lines = [];
+        lines.push(rootKey + ":");
 
-        downloadText(filename, yaml);
-      }
+        const filtered = matchesFromA.filter(
+          (m) => m.toIndex !== null && listB && listB[m.toIndex]
+        );
 
-      exportBtn.addEventListener("click", exportYamlForCurrentView);
+        if (filtered.length === 0) {
+          return "list1: []\n";
+        }
 
-      const activeTab = document.querySelector(".tab-button.active");
-      if (activeTab && activeTab.getAttribute("data-tab") === "viewB") {
-        currentView = "B";
-      }
-      updateExportButtonLabel();
+        filtered.forEach(function (m) {
+          const parentText = listA[m.fromIndex] || "";
+          const childText = listB[m.toIndex] || "";
 
-      resultsHeader.appendChild(exportBtn);
-
-      document.querySelectorAll(".tab-button").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          const tab = btn.getAttribute("data-tab");
-          currentView = tab === "viewB" ? "B" : "A";
-          updateExportButtonLabel();
+          lines.push("  - parent: " + toYamlScalar(parentText));
+          lines.push("    children:");
+          lines.push("      - " + toYamlScalar(childText));
         });
+
+        // ICI : "\n" (un seul backslash), pas "\\n"
+        return lines.join("\n") + "\n";
+      } else {
+        if (!Array.isArray(listB) || !Array.isArray(matchesFromB)) {
+          return "list2: []\n";
+        }
+
+        const rootKey = "list2";
+        const lines = [];
+        lines.push(rootKey + ":");
+
+        const filtered = matchesFromB.filter(
+          (m) => m.toIndex !== null && listA && listA[m.toIndex]
+        );
+
+        if (filtered.length === 0) {
+          return "list2: []\n";
+        }
+
+        filtered.forEach(function (m) {
+          const parentText = listB[m.fromIndex] || "";
+          const childText = listA[m.toIndex] || "";
+
+          lines.push("  - parent: " + toYamlScalar(parentText));
+          lines.push("    children:");
+          lines.push("      - " + toYamlScalar(childText));
+        });
+
+        return lines.join("\n") + "\n";
+      }
+    }
+
+    const resultsHeader = document.querySelector(".results-header");
+    if (!resultsHeader) return;
+
+    let currentView = "A"; // "A" = view by list1, "B" = view by list2
+
+    const exportBtn = document.createElement("button");
+    exportBtn.type = "button";
+    exportBtn.className = "chip";
+    exportBtn.style.cursor = "pointer";
+    exportBtn.setAttribute("aria-label", "Export matches as YAML");
+
+    function updateExportButtonLabel() {
+      const icon = "⇩";
+      if (currentView === "A") {
+        exportBtn.innerHTML = `<span>${icon}</span> Export list 1 (YAML)`;
+      } else {
+        exportBtn.innerHTML = `<span>${icon}</span> Export list 2 (YAML)`;
+      }
+    }
+
+    function exportYamlForCurrentView() {
+      const data = window.__matchExportData;
+      if (
+        !data ||
+        !Array.isArray(data.listA) ||
+        !Array.isArray(data.listB)
+      ) {
+        alert("Please run the analysis first to generate matches.");
+        return;
+      }
+
+      const yaml = buildYaml(currentView, data);
+      const filename =
+        currentView === "A"
+          ? "matches_list1.yaml"
+          : "matches_list2.yaml";
+
+      downloadText(filename, yaml);
+    }
+
+    exportBtn.addEventListener("click", exportYamlForCurrentView);
+
+    const activeTab = document.querySelector(".tab-button.active");
+    if (activeTab && activeTab.getAttribute("data-tab") === "viewB") {
+      currentView = "B";
+    }
+    updateExportButtonLabel();
+
+    resultsHeader.appendChild(exportBtn);
+
+    document.querySelectorAll(".tab-button").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        const tab = btn.getAttribute("data-tab");
+        currentView = tab === "viewB" ? "B" : "A";
+        updateExportButtonLabel();
       });
-    })();
-  </script>
+    });
+  })();
+</script>
 
   <script>
     // ---------------------------------------------------
