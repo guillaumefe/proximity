@@ -3028,5 +3028,271 @@ function parseList(text) {
       });
     })();
   </script>
+<script>
+  (function () {
+    // On vérifie que la fonction de rendu existe déjà
+    if (typeof window.renderMatches !== "function") return;
+
+    // --- Ajout de l'onglet "Unmatched" ---
+    const tabsContainer = document.querySelector(".results-tabs");
+    const resultsBody = document.querySelector(".results-body");
+    const resultsHeader = document.querySelector(".results-header");
+    if (!tabsContainer || !resultsBody || !resultsHeader) return;
+
+    // Bouton de tab "Unmatched"
+    const unmatchedTabBtn = document.createElement("button");
+    unmatchedTabBtn.id = "tab-unmatched";
+    unmatchedTabBtn.className = "tab-button";
+    unmatchedTabBtn.setAttribute("data-tab", "viewUnmatched");
+    unmatchedTabBtn.setAttribute("role", "tab");
+    unmatchedTabBtn.setAttribute("aria-selected", "false");
+    unmatchedTabBtn.setAttribute("aria-controls", "viewUnmatched");
+    unmatchedTabBtn.tabIndex = -1;
+    unmatchedTabBtn.innerHTML = `
+      <span>Unmatched</span>
+      <span class="count" id="countUnmatched">0</span>
+    `;
+    tabsContainer.appendChild(unmatchedTabBtn);
+
+    const countUnmatchedEl = document.getElementById("countUnmatched");
+
+    // Panel de contenu "Unmatched"
+    const unmatchedPanel = document.createElement("div");
+    unmatchedPanel.id = "viewUnmatched";
+    unmatchedPanel.className = "results-list";
+    unmatchedPanel.setAttribute("role", "tabpanel");
+    unmatchedPanel.setAttribute("aria-labelledby", "tab-unmatched");
+    unmatchedPanel.tabIndex = 0;
+    unmatchedPanel.innerHTML =
+      '<div class="empty-state">Run the analysis to see unmatched items.</div>';
+    resultsBody.appendChild(unmatchedPanel);
+
+    // Helper générique pour activer un tab
+    function activateTab(targetId) {
+      document.querySelectorAll(".tab-button").forEach((btn) => {
+        const isActive = btn.getAttribute("data-tab") === targetId;
+        btn.classList.toggle("active", isActive);
+        btn.setAttribute("aria-selected", isActive ? "true" : "false");
+        btn.tabIndex = isActive ? 0 : -1;
+      });
+      document.querySelectorAll(".results-list").forEach((panel) => {
+        panel.classList.toggle("active", panel.id === targetId);
+      });
+    }
+
+    unmatchedTabBtn.addEventListener("click", () => {
+      activateTab("viewUnmatched");
+    });
+
+    unmatchedTabBtn.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const tabs = Array.from(document.querySelectorAll(".tab-button"));
+      const index = tabs.indexOf(unmatchedTabBtn);
+      if (index === -1) return;
+      const direction = event.key === "ArrowRight" ? 1 : -1;
+      let nextIndex = index + direction;
+      if (nextIndex < 0) nextIndex = tabs.length - 1;
+      if (nextIndex >= tabs.length) nextIndex = 0;
+      tabs[nextIndex].click();
+      tabs[nextIndex].focus();
+    });
+
+    // --- Export YAML pour les unmatched ---
+    const exportUnmatchedBtn = document.createElement("button");
+    exportUnmatchedBtn.type = "button";
+    exportUnmatchedBtn.className = "chip";
+    exportUnmatchedBtn.style.cursor = "pointer";
+    exportUnmatchedBtn.setAttribute(
+      "aria-label",
+      "Export unmatched items as YAML"
+    );
+    exportUnmatchedBtn.innerHTML = `<span>⇩</span> Export unmatched (YAML)`;
+    resultsHeader.appendChild(exportUnmatchedBtn);
+
+    // Stockage des indices unmatched pour l'export
+    window.__unmatchedData = null;
+
+    function toYamlScalarUnmatched(value) {
+      if (value == null) return '""';
+      const str = String(value);
+
+      // multi-ligne → bloc YAML
+      if (/\r?\n/.test(str)) {
+        const cleaned = str.replace(/\r?\n/g, "\n");
+        const indented = cleaned
+          .split("\n")
+          .map((l) => "    " + l)
+          .join("\n");
+        return "|\n" + indented;
+      }
+
+      const escaped = str.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      return `"${escaped}"`;
+    }
+
+    function downloadTextUnmatched(filename, text) {
+      const blob = new Blob([text], {
+        type: "text/yaml;charset=utf-8;",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 0);
+    }
+
+    function buildUnmatchedYaml(data) {
+      const { listA, listB, unmatchedAIndices, unmatchedBIndices } = data || {};
+      const lines = [];
+
+      lines.push("unmatched:");
+
+      if (Array.isArray(unmatchedAIndices) && unmatchedAIndices.length) {
+        lines.push("  list1:");
+        unmatchedAIndices.forEach((idx) => {
+          const txt = (listA && listA[idx]) || "";
+          lines.push("    - " + toYamlScalarUnmatched(txt));
+        });
+      } else {
+        lines.push("  list1: []");
+      }
+
+      if (Array.isArray(unmatchedBIndices) && unmatchedBIndices.length) {
+        lines.push("  list2:");
+        unmatchedBIndices.forEach((idx) => {
+          const txt = (listB && listB[idx]) || "";
+          lines.push("    - " + toYamlScalarUnmatched(txt));
+        });
+      } else {
+        lines.push("  list2: []");
+      }
+
+      lines.push("");
+      return lines.join("\n");
+    }
+
+    exportUnmatchedBtn.addEventListener("click", () => {
+      const data = window.__unmatchedData;
+      if (
+        !data ||
+        !Array.isArray(data.listA) ||
+        !Array.isArray(data.listB)
+      ) {
+        alert("Please run the analysis first to generate unmatched items.");
+        return;
+      }
+      const yaml = buildUnmatchedYaml(data);
+      downloadTextUnmatched("unmatched.yaml", yaml);
+    });
+
+    // --- Surcharger renderMatches pour remplir l'onglet "Unmatched" ---
+    const previousRenderMatches = window.renderMatches;
+
+    window.renderMatches = function (listA, listB, result) {
+      const r = previousRenderMatches
+        ? previousRenderMatches(listA, listB, result)
+        : undefined;
+
+      const matchesFromA =
+        result && Array.isArray(result.matchesFromA)
+          ? result.matchesFromA
+          : [];
+      const matchesFromB =
+        result && Array.isArray(result.matchesFromB)
+          ? result.matchesFromB
+          : [];
+
+      const unmatchedAIndices = [];
+      const unmatchedBIndices = [];
+
+      matchesFromA.forEach((m) => {
+        if (!m || m.fromIndex == null) return;
+        if (m.toIndex === null || m.toIndex === undefined) {
+          unmatchedAIndices.push(m.fromIndex);
+        }
+      });
+
+      matchesFromB.forEach((m) => {
+        if (!m || m.fromIndex == null) return;
+        if (m.toIndex === null || m.toIndex === undefined) {
+          unmatchedBIndices.push(m.fromIndex);
+        }
+      });
+
+      const unmatchedA = unmatchedAIndices.map((i) => listA[i]).filter(Boolean);
+      const unmatchedB = unmatchedBIndices.map((i) => listB[i]).filter(Boolean);
+
+      const totalUnmatched = unmatchedA.length + unmatchedB.length;
+      if (countUnmatchedEl) {
+        countUnmatchedEl.textContent = totalUnmatched;
+      }
+
+      if (unmatchedA.length === 0 && unmatchedB.length === 0) {
+        unmatchedPanel.innerHTML =
+          '<div class="empty-state">All items are matched at the current threshold.</div>';
+      } else {
+        let html = "";
+
+        if (unmatchedA.length) {
+          html += `
+            <div class="item-card" style="margin-bottom:6px;">
+              <div class="item-label">
+                <span><strong>Unmatched from list 1</strong></span>
+              </div>
+              <div class="item-text">
+                ${unmatchedA
+                  .map((txt, idx) => {
+                    const label = "L1 #" + (unmatchedAIndices[idx] + 1);
+                    return (
+                      escapeHtml(label + ": " + (txt || ""))
+                    );
+                  })
+                  .join("<br/>")}
+              </div>
+            </div>
+          `;
+        }
+
+        if (unmatchedB.length) {
+          html += `
+            <div class="item-card">
+              <div class="item-label">
+                <span><strong>Unmatched from list 2</strong></span>
+              </div>
+              <div class="item-text">
+                ${unmatchedB
+                  .map((txt, idx) => {
+                    const label = "L2 #" + (unmatchedBIndices[idx] + 1);
+                    return (
+                      escapeHtml(label + ": " + (txt || ""))
+                    );
+                  })
+                  .join("<br/>")}
+              </div>
+            </div>
+          `;
+        }
+
+        unmatchedPanel.innerHTML = html;
+      }
+
+      // On stocke les infos pour l'export YAML
+      window.__unmatchedData = {
+        listA: Array.isArray(listA) ? listA.slice() : [],
+        listB: Array.isArray(listB) ? listB.slice() : [],
+        unmatchedAIndices: unmatchedAIndices.slice(),
+        unmatchedBIndices: unmatchedBIndices.slice(),
+      };
+
+      return r;
+    };
+  })();
+</script>
 </body>
 </html>
